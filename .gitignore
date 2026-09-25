@@ -1,0 +1,25 @@
+/node_modules
+/.next
+/out
+/build
+/.next/
+next-env.d.ts
+*.tsbuildinfo
+
+# local data / secrets
+/data
+.env
+.env.local
+
+# logs
+*.log
+npm-debug.log*
+
+# os
+.DS_Store
+
+# gateway deps
+apps/*/node_modules
+
+# python impersonation venv
+.venv

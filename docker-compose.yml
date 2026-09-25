@@ -1,0 +1,15 @@
+services:
+  bahnfinder:
+    build: .
+    container_name: bahnfinder
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3005:3005"
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=production
+      - DATABASE_PATH=/app/data/bahn-finder.db
+      - TZ=Europe/Berlin
+    volumes:
+      - ./data:/app/data

@@ -1,0 +1,13 @@
+{
+  "name": "bahn-finder-db-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Tiny DB-Vendo gateway for the Sparpreis-Explorer. Runs on a residential connection so DB price/ticket lookups aren't IP-blocked.",
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "dependencies": {
+    "db-vendo-client": "^6.11.3"
+  }
+}

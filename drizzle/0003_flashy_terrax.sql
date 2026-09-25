@@ -1,0 +1,1 @@
+ALTER TABLE `journeys` ADD `result_kind` text;

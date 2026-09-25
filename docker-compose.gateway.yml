@@ -1,0 +1,23 @@
+# Residential DB-Vendo gateway. Run this on a machine with a normal home
+# internet connection (e.g. a Raspberry Pi), NOT on the blocked datacenter host.
+#
+#   GATEWAY_TOKEN=$(openssl rand -hex 24) docker compose -f docker-compose.gateway.yml up -d --build
+#
+# Then point the main app at it (in the main .env):
+#   DB_VENDO_MODE=gateway
+#   DB_VENDO_GATEWAY_URL=http://<pi-tailscale-name>:3009
+#   DB_VENDO_GATEWAY_TOKEN=<same token>
+services:
+  db-gateway:
+    build: ./apps/db-gateway
+    container_name: bahn-db-gateway
+    restart: unless-stopped
+    # Bind to Tailscale/loopback only — no public port exposure needed.
+    ports:
+      - "3009:3009"
+    environment:
+      - PORT=3009
+      - GATEWAY_TOKEN=${GATEWAY_TOKEN:?set GATEWAY_TOKEN}
+      - DB_PROFILE=${DB_PROFILE:-db}
+      - USER_AGENT=${USER_AGENT:-bahn-finder-db-gateway}
+      - MAX_CONCURRENCY=${MAX_CONCURRENCY:-3}

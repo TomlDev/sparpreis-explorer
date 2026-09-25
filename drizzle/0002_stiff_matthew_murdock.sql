@@ -1,0 +1,1 @@
+ALTER TABLE `profile_stations` ADD `enabled` integer DEFAULT true NOT NULL;
