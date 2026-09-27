@@ -20,6 +20,7 @@ import { waitClass, walkWait } from "@/lib/domain/transferWait";
 import { formatTime } from "@/lib/time";
 import { cn, formatDuration, formatEuro } from "@/lib/utils";
 import { Badge, Button, Card } from "@/components/ui";
+import { MissChance, ReliabilityBadges, ReliabilityDetails, transferInto } from "@/components/Reliability";
 
 function CoverageBadge({ coverage, reason }: { coverage: SearchResult["coverage"]["coverage"]; reason: string }) {
   if (coverage === "green")
@@ -217,6 +218,7 @@ export function ResultCard({
               )}
               {r.resultKind === "proforma" && <Badge variant="muted">Pro-Forma</Badge>}
               {r.variantLabel && <Badge variant="outline">ab {r.variantLabel}</Badge>}
+              <ReliabilityBadges rel={r.reliability} />
             </div>
           </div>
 
@@ -321,7 +323,8 @@ export function ResultCard({
 
       {open && (
         <div className="border-t border-border bg-muted/30 p-4 sm:p-5">
-          <Itinerary legs={r.legs} />
+          <Itinerary legs={r.legs} reliability={r.reliability} />
+          <ReliabilityDetails rel={r.reliability} />
 
           {history && history.length > 1 && (
             <div className="mt-4">
@@ -429,13 +432,14 @@ function ChainPills({ legs }: { legs: Leg[] }) {
 }
 
 /** Expanded plan — DB-style vertical timeline (time · node/line · station/train). */
-function Itinerary({ legs }: { legs: Leg[] }) {
+function Itinerary({ legs, reliability }: { legs: Leg[]; reliability?: SearchResult["reliability"] }) {
   const last = legs[legs.length - 1];
   return (
     <div className="text-sm">
       {legs.map((leg, i) => {
         const st = productStyle(leg);
         const wait = walkWait(legs, i);
+        const miss = transferInto(reliability, i);
         return (
           <div key={i}>
             {/* boarding stop */}
@@ -451,7 +455,7 @@ function Itinerary({ legs }: { legs: Leg[] }) {
             {/* the ride / walk */}
             <div className="grid grid-cols-[3.25rem_1.25rem_1fr] items-stretch">
               {/* transfer time (or start buffer) — left of the line */}
-              <div className="flex items-center pr-1">
+              <div className="flex flex-col justify-center pr-1">
                 {wait && (wait.transfer ? wait.min >= 0 : wait.min > 0) && (
                   <span
                     className={cn("tabular-nums text-[11px]", waitClass(wait))}
@@ -460,6 +464,7 @@ function Itinerary({ legs }: { legs: Leg[] }) {
                     {wait.min} min
                   </span>
                 )}
+                {miss && <MissChance t={miss} />}
               </div>
               <div className="flex justify-center">
                 {leg.isWalking ? (

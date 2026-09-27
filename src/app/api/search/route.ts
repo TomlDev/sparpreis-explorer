@@ -45,6 +45,7 @@ function normalizeFilters(f: unknown): SearchFilters {
     useFallback: o.useFallback ?? DEFAULT_FILTERS.useFallback,
     allowSlow: o.allowSlow ?? DEFAULT_FILTERS.allowSlow,
     minTransferMin: num(o.minTransferMin),
+    minFlexPct: num(o.minFlexPct),
   };
 }
 

@@ -22,6 +22,7 @@ import { upsertLocation } from "@/lib/repo/locations";
 import { localDeparture } from "@/lib/time";
 import { dlog } from "@/lib/log";
 import { getInterestingEdges, learnFromJourney } from "./patterns";
+import { annotateReliability } from "@/lib/delay";
 import { selectForPricing } from "./strategy";
 import {
   logDecision,
@@ -324,6 +325,7 @@ export async function runSearch(params: SearchParams, opts: RunOptions): Promise
       r.isProformaWin =
         r.resultKind === "proforma" && p != null && anchorPrice != null && p < anchorPrice;
     }
+    annotateReliability(collected.values(), params.travelDate);
     return rankResults(applyFilters([...collected.values()], params.filters), params.sort);
   };
 

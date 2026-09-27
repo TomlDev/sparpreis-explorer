@@ -50,7 +50,7 @@ nur die besten N Kandidaten  →  DB-Vendo (über Wohnanschluss-Gateway)
 ```bash
 npm install
 cp .env.example .env      # APP_PASSWORD setzen, AUTH_SECRET erzeugen: openssl rand -hex 32
-python3 -m venv .venv && .venv/bin/pip install curl_cffi   # für DB_VENDO_MODE=direct
+python3 -m venv .venv && .venv/bin/pip install curl_cffi duckdb   # curl_cffi: DB_VENDO_MODE=direct, duckdb: Pünktlichkeitsdaten
 npm run db:generate       # Drizzle-Migrationen erzeugen (einmalig / bei Schemaänderung)
 npm run db:migrate
 npm run dev               # http://localhost:3005
@@ -134,6 +134,25 @@ Pricing (`DB_VENDO_MODE`):
 
 Der Preis in der App ist **keine verbindliche Buchungsgarantie** – „Bei DB prüfen“
 öffnet bahn.de mit vorbelegter Verbindung.
+
+## Pünktlichkeit (Open Data)
+
+Unter **Einstellungen → Pünktlichkeit** lädt ein Knopfdruck die echten Ist-Zeiten
+vergangener Monate aus [piebro/deutsche-bahn-data](https://huggingface.co/datasets/piebro/deutsche-bahn-data)
+(DB Timetables API, CC BY 4.0). Wählbar sind die letzten 1–12 Monate und optional dieselbe
+Jahreszeit aus Vor- und Vorvorjahr. `scripts/delay_ingest.py` (Python + DuckDB) lädt jeden
+Monat (~600 MB) temporär nach `data/delay-tmp/`, aggregiert ihn für die Bahnhöfe aus deinen
+Suchen zu kompakten Verspätungs-Histogrammen (Zug → Linie+Stunde → Linie → Bahnhof,
+Wochentagsgruppe, Ausfälle) in SQLite und löscht die Rohdatei wieder. Die Suche liest nur
+noch diese Tabellen.
+
+Pro Verbindung zeigt die App daraus **Anschluss-Chance**, Verpass-Wahrscheinlichkeit je
+Umstieg und **Flex-Chance**, also die geschätzte Wahrscheinlichkeit, ≥ 20 min zu spät
+anzukommen (dann ist die Zugbindung aufgehoben). Dazu gibt es die Sortierung „Unzuverlässigste“
+und einen Mindest-Flex-Filter. Die Gewichtung (Halbwertszeit, Saison, Wochentag,
+Mindest-Beobachtungen) lässt sich ohne neuen Import ändern. Alles sind Schätzungen aus
+vergangenen Monaten, keine Aussage über einen konkreten Zug. Python-Pfad: `DELAY_PYTHON`
+(Standard `DB_IMPERSONATE_PYTHON`).
 
 ## Lizenz
 

@@ -3,6 +3,7 @@
 import * as React from "react";
 import { Check, ChevronDown, ChevronUp, Plus, Trash2 } from "lucide-react";
 import { AppHeader } from "@/components/AppHeader";
+import { DelayDataCard } from "@/components/DelayDataCard";
 import { Badge, Button, Card, Input, Spinner, Switch } from "@/components/ui";
 import { formatAgo } from "@/lib/time";
 
@@ -171,6 +172,8 @@ export default function SettingsPage() {
             <AddStation profileId={p.id} onAdd={(name) => post({ action: "addStation", profileId: p.id, stationName: name, query: name })} />
           </Card>
         ))}
+
+        <DelayDataCard />
 
         {/* Favorites */}
         <Card className="p-4">

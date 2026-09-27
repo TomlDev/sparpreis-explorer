@@ -1,3 +1,4 @@
+import type { Reliability } from "@/lib/delay/reliability";
 import type { NormJourney, NormLeg } from "@/lib/rail/types";
 import { minutesBetween } from "@/lib/time";
 import { analyzeJourney, type JourneyMetrics } from "./analyze";
@@ -27,6 +28,9 @@ export interface LegView {
   productLabel: string;
   lineName?: string;
   trainNumber?: string;
+  /** Provider station ids (EVA for DB) — used to match punctuality data. */
+  fromId?: string | null;
+  toId?: string | null;
   fromName: string;
   toName: string;
   plannedDeparture: string | null;
@@ -62,6 +66,8 @@ export interface SearchResult {
   savingsVsAnchor: number | null;
   /** true when a pro-forma candidate actually beats the anchor. */
   isProformaWin: boolean;
+  /** Punctuality estimate from historical open data (null = no data loaded). */
+  reliability?: Reliability | null;
 }
 
 export function legViews(journey: NormJourney): LegView[] {
@@ -70,6 +76,8 @@ export function legViews(journey: NormJourney): LegView[] {
     productLabel: productLabel(l.product),
     lineName: l.lineName,
     trainNumber: l.trainNumber,
+    fromId: l.origin.id ?? null,
+    toId: l.destination.id ?? null,
     fromName: l.origin.name,
     toName: l.destination.name,
     plannedDeparture: l.plannedDeparture ?? l.departure ?? null,

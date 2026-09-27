@@ -19,6 +19,8 @@ export interface SearchFilters {
   useFallback: boolean;
   allowSlow: boolean;
   minTransferMin: number | null;
+  /** Only connections with at least this % chance of ≥ 20 min delay (punctuality data). */
+  minFlexPct: number | null;
 }
 
 export const DEFAULT_FILTERS: SearchFilters = {
@@ -38,6 +40,7 @@ export const DEFAULT_FILTERS: SearchFilters = {
   useFallback: true,
   allowSlow: true,
   minTransferMin: null,
+  minFlexPct: null,
 };
 
 export interface SearchParams {

@@ -60,7 +60,15 @@ export const DEFAULT_VIEW: ViewState = {
   dialog: null,
 };
 
-const SORTS: SortMode[] = ["proforma", "cheapest", "fastest", "least-fv", "fewest-transfers", "tight-transfers"];
+const SORTS: SortMode[] = [
+  "proforma",
+  "cheapest",
+  "fastest",
+  "least-fv",
+  "fewest-transfers",
+  "tight-transfers",
+  "unreliable",
+];
 const MODES: SearchModeKey[] = ["fast", "thorough", "deep"];
 const DIALOGS: ViewDialog[] = ["filters", "calendar", "compare"];
 const HHMM = /^\d{1,2}:\d{2}$/;

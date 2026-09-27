@@ -65,6 +65,12 @@ export function FiltersSheet({
         <NumField label="Max. ICE-Minuten" value={filters.maxFvMinutes} onChange={(v) => set("maxFvMinutes", v)} suffix="min" />
         <NumField label="Max. ICE-Halte" value={filters.maxFvStops} onChange={(v) => set("maxFvStops", v)} />
         <NumField label="Max. Fernverkehr-Abschnitte (0 = unbegrenzt)" value={filters.maxFvLegs} onChange={(v) => set("maxFvLegs", v)} />
+        <NumField
+          label="Min. Flex-Chance (≥ 20 min später, Statistik)"
+          value={filters.minFlexPct}
+          onChange={(v) => set("minFlexPct", v)}
+          suffix="%"
+        />
 
         <button
           type="button"

@@ -7,7 +7,8 @@ export type SortMode =
   | "fastest"
   | "least-fv"
   | "fewest-transfers"
-  | "tight-transfers";
+  | "tight-transfers"
+  | "unreliable";
 
 export const SORT_LABELS: Record<SortMode, string> = {
   proforma: "✨ Pro-Forma",
@@ -16,7 +17,14 @@ export const SORT_LABELS: Record<SortMode, string> = {
   "least-fv": "🚄 Wenigster ICE",
   "fewest-transfers": "🔁 Wenigste Umstiege",
   "tight-transfers": "⏱ Knappe Umstiege",
+  unreliable: "🎲 Unzuverlässigste",
 };
+
+/** Highest chance of ≥ 20 min delay first (Zugbindung likely lifted);
+ *  connections without punctuality data last. */
+export function flexOrder(a: SearchResult, b: SearchResult): number {
+  return (b.reliability?.flexPct ?? -1) - (a.reliability?.flexPct ?? -1);
+}
 
 /**
  * Default "Pro-Forma" score (lower = better): a valid through-ticket dominates,
@@ -65,6 +73,8 @@ export function compareBy(mode: SortMode): (a: SearchResult, b: SearchResult) =>
       // Shortest "shortest transfer" first (purely informational sort).
       return (a, b) =>
         (a.metrics.minTransferMin ?? 1e9) - (b.metrics.minTransferMin ?? 1e9);
+    case "unreliable":
+      return (a, b) => flexOrder(a, b) || priceOr(a, 1e9) - priceOr(b, 1e9);
     case "proforma":
     default:
       return (a, b) => a.score - b.score;

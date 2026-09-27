@@ -453,6 +453,61 @@ export const providerStatus = sqliteTable("provider_status", {
   pausedUntil: integer("paused_until"),
 });
 
+// ---------------------------------------------------------------------------
+// Punctuality statistics from open data (piebro/deutsche-bahn-data, CC BY 4.0).
+// A "build" = one processing run (button in settings). delay_stats holds
+// per-(level,key,station,month,weekday-group) delay histograms; the active
+// build is the newest one with status "done".
+// ---------------------------------------------------------------------------
+export const delayBuilds = sqliteTable("delay_builds", {
+  id: text("id").primaryKey(),
+  status: text("status").notNull(), // running | done | failed
+  params: text("params", { mode: "json" }).notNull(),
+  months: text("months", { mode: "json" }).$type<string[]>().notNull(),
+  stations: integer("stations").notNull().default(0),
+  rows: integer("rows").notNull().default(0),
+  error: text("error"),
+  startedAt: integer("started_at").notNull(),
+  finishedAt: integer("finished_at"),
+});
+
+export const delayStats = sqliteTable(
+  "delay_stats",
+  {
+    buildId: text("build_id").notNull(),
+    // train (key = train number) | line_hour (key = "RE2|14") | line (key = "RE2"/"ICE") | station (key = "")
+    level: text("level").notNull(),
+    key: text("key").notNull(),
+    eva: text("eva").notNull(), // EVA number without leading zeros
+    month: text("month").notNull(), // yyyy-MM
+    dow: text("dow").notNull(), // wk (Mo–Do) | fr | we (Sa/So) | all
+    n: integer("n").notNull(),
+    cancelled: integer("cancelled").notNull(),
+    // Sparse histograms [[minuteBin, count], …]; bins 0..30 per minute, then 38/53/75.
+    arrHist: text("arr_hist", { mode: "json" }).$type<[number, number][]>().notNull(),
+    depHist: text("dep_hist", { mode: "json" }).$type<[number, number][]>().notNull(),
+  },
+  (t) => ({
+    byLookup: index("delaystats_lookup_idx").on(t.buildId, t.level, t.eva, t.key),
+  }),
+);
+
+/** Station dictionary of the dataset (name → EVA) for matching our legs by name. */
+export const delayStations = sqliteTable(
+  "delay_stations",
+  {
+    buildId: text("build_id").notNull(),
+    eva: text("eva").notNull(),
+    name: text("name").notNull(),
+    norm: text("norm").notNull(), // normalized name (same rule as lib/delay/normalize)
+    loose: text("loose").notNull(), // normalized without "(…)" qualifiers, e.g. "Freiburg (Breisgau) Hbf" → "freiburg hbf"
+  },
+  (t) => ({
+    byNorm: index("delaystations_norm_idx").on(t.buildId, t.norm),
+    byLoose: index("delaystations_loose_idx").on(t.buildId, t.loose),
+  }),
+);
+
 export type LocationRow = typeof locations.$inferSelect;
 export type JourneyRow = typeof journeys.$inferSelect;
 export type JourneyLegRow = typeof journeyLegs.$inferSelect;

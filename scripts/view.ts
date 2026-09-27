@@ -214,7 +214,12 @@ async function main(): Promise<void> {
     const fv = m.fvLegs ? `FV ${m.fvLegs}× ${m.fvMinutes} min` : "kein FV";
     const knapp =
       m.minTransferMin != null ? ` · knappster ${m.minTransferMin} min` : "";
-    return `${idx} ${formatTime(m.plannedDeparture)}–${formatTime(m.plannedArrival)} ${dur(m.durationMin)} · ${m.transfers} Umst${knapp} · ${eur(r.coverage.price)} (${r.coverage.coverage}) · ${r.resultKind} · ${fv}${flagsOf(r)}\n     ${r.fingerprint}  ${r.chainLabel}`;
+    const rel = r.reliability;
+    const pct = (p: number) => `${Math.round(p * 100)}%`;
+    const punct = rel
+      ? ` · Anschluss ${pct(rel.okPct)} · Flex ${pct(rel.flexPct)}${rel.complete ? "" : "*"} (${rel.basis})`
+      : "";
+    return `${idx} ${formatTime(m.plannedDeparture)}–${formatTime(m.plannedArrival)} ${dur(m.durationMin)} · ${m.transfers} Umst${knapp} · ${eur(r.coverage.price)} (${r.coverage.coverage}) · ${r.resultKind} · ${fv}${punct}${flagsOf(r)}\n     ${r.fingerprint}  ${r.chainLabel}`;
   }
 
   function itinerary(r: SearchResult): string {
@@ -233,10 +238,14 @@ async function main(): Promise<void> {
           const wait = w
             ? ` · ${w.transfer ? "Umstieg" : "Puffer"} ${w.min} min${mark}`
             : "";
-          return `       ${t}  ${l.fromName} — Fußweg ${l.durationMin} min${wait}`;
+          const miss = r.reliability?.transfers.find((x) => x.afterLeg + 1 === i);
+          const missTxt = miss ? ` · ${Math.round(miss.missPct * 100)}% verpasst` : "";
+          return `       ${t}  ${l.fromName} — Fußweg ${l.durationMin} min${wait}${missTxt}`;
         }
         const stops = l.stops ? ` · ${l.stops} Zwischenhalte` : "";
-        return `       ${t}  ${l.fromName} — ${l.lineName || l.productLabel} (${l.durationMin} min${stops}) → ${formatTime(l.plannedArrival)} ${l.toName}`;
+        const direct = r.reliability?.transfers.find((x) => x.afterLeg + 1 === i);
+        const miss = direct ? ` [Anschluss ${Math.round(direct.missPct * 100)}% verpasst]` : "";
+        return `       ${t}  ${l.fromName} — ${l.lineName || l.productLabel} (${l.durationMin} min${stops}) → ${formatTime(l.plannedArrival)} ${l.toName}${miss}`;
       })
       .join("\n");
   }

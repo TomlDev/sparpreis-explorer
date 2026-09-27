@@ -23,3 +23,6 @@ apps/*/node_modules
 
 # python impersonation venv
 .venv
+
+# python
+__pycache__/
