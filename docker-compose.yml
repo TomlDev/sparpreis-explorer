@@ -12,4 +12,8 @@ services:
       - DATABASE_PATH=/app/data/bahn-finder.db
       - TZ=Europe/Berlin
     volumes:
-      - ./data:/app/data
+      # Named volume: gets the image's ownership (user "app"), unlike a host bind mount.
+      - bahnfinder-data:/app/data
+
+volumes:
+  bahnfinder-data:

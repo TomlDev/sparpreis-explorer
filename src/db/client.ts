@@ -27,9 +27,11 @@ function resolveDbPath(): string {
 
 function open(): { db: DB; sqlite: Database.Database } {
   const sqlite = new Database(resolveDbPath());
+  // busy_timeout first: switching a fresh DB to WAL needs a lock, and several
+  // processes (e.g. `next build` workers) may open it at the same time.
+  sqlite.pragma("busy_timeout = 5000");
   sqlite.pragma("journal_mode = WAL");
   sqlite.pragma("foreign_keys = ON");
-  sqlite.pragma("busy_timeout = 5000");
   const db = drizzle(sqlite, { schema });
   return { db, sqlite };
 }

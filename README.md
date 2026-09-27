@@ -95,6 +95,12 @@ npm run build
 npm run start             # http://localhost:3005
 ```
 
+**Oder mit Docker** (bringt Node und Python schon mit, nur die `.env` wie oben anlegen):
+
+```bash
+docker compose up -d --build   # http://localhost:3005, Daten im Volume "bahnfinder-data"
+```
+
 Zum Ausprobieren ganz ohne Netzabfragen gibt es Demodaten:
 `ROUTING_PROVIDER=mock` und `DB_VENDO_MODE=mock` in der `.env`.
 
