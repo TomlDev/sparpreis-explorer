@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/logo-dark.svg">
+    <img alt="Sparpreis-Explorer" src="docs/logo.svg" width="580">
+  </picture>
+</p>
+
 # Sparpreis-Explorer / Pro-Forma-ICE-Finder
 
 Findet ungewöhnlich günstige DB-Fernverkehrstickets für eine Stammstrecke – gezielt
@@ -12,6 +19,7 @@ Beispielstrecke (Seed für eine leere Datenbank, in den Einstellungen änderbar)
 > öffentliche Fahrplan- und Preis-Schnittstellen in geringem Umfang ab (Cache, Tageslimit,
 > Rate-Limiter). Wer es selbst betreibt, ist für die Einhaltung der jeweiligen
 > Nutzungsbedingungen verantwortlich. Preise ohne Gewähr — maßgeblich ist die Buchung bei der DB.
+> Das Logo ist nur an die Farben der DB angelehnt und kein Logo der Deutschen Bahn.
 
 ## Hybride Architektur (Fahrplan ≠ Preis)
 
