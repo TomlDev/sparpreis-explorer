@@ -5,163 +5,131 @@
   </picture>
 </p>
 
-# Sparpreis-Explorer / Pro-Forma-ICE-Finder
+# Sparpreis-Explorer
 
-Findet ungewöhnlich günstige DB-Fernverkehrstickets für eine Stammstrecke – gezielt
-Verbindungen mit **gültigem durchgehenden Ticket, mindestens einem ICE/IC/EC-Abschnitt
-und möglichst kleinem Fernverkehrsanteil**. Die App lernt aus jeder Suche einen kleinen
-Streckengraphen und wird auf der Stammstrecke mit der Zeit schneller und „schlauer“.
+Findet günstige Bahn-Tickets für deine Stammstrecke, die man bei bahn.de so nicht angezeigt
+bekommt.
 
-Beispielstrecke (Seed für eine leere Datenbank, in den Einstellungen änderbar):
-**Bochum-Langendreer ⇄ Triberg** (Fallback-Start: Bochum Hbf).
+Die Idee: Ein Sparpreis gilt nur für Verbindungen mit Fernverkehr. Oft reicht aber schon
+**ein kurzes ICE-Stück**, der Rest der Strecke läuft im Nahverkehr, und trotzdem ist alles
+**ein durchgehendes Ticket** zum Sparpreis. Solche Verbindungen sind häufig deutlich billiger
+als die Standardvorschläge der DB. Die App sucht sie gezielt, prüft die echten Preise und
+zeigt dir nur, was tatsächlich buchbar ist.
 
-> **Hinweis:** Privates Hobbyprojekt, nicht mit der Deutschen Bahn verbunden. Es fragt
-> öffentliche Fahrplan- und Preis-Schnittstellen in geringem Umfang ab (Cache, Tageslimit,
-> Rate-Limiter). Wer es selbst betreibt, ist für die Einhaltung der jeweiligen
-> Nutzungsbedingungen verantwortlich. Preise ohne Gewähr — maßgeblich ist die Buchung bei der DB.
-> Das Logo ist nur an die Farben der DB angelehnt und kein Logo der Deutschen Bahn.
+> **Hinweis:** Privates Hobbyprojekt, nicht mit der Deutschen Bahn verbunden. Preise ohne
+> Gewähr, maßgeblich ist die Buchung bei der DB. Das Logo ist nur an die Farben der DB
+> angelehnt.
 
-## Hybride Architektur (Fahrplan ≠ Preis)
+## Was die App kann
 
-Fahrplanwissen ist billig und cachebar; DB-Preisabfragen sind die knappe,
-IP-geblockte Ressource. Deshalb sind sie getrennt:
+- **Günstigere Alternativen zu deiner Wunschverbindung:** Du wählst eine Verbindung als
+  Referenz, die App sucht alle billigeren Varianten mit denselben ersten Zügen.
+- **Echte Sparpreise:** Jeder angezeigte Preis kommt direkt von der DB, inklusive BahnCard,
+  Klasse und Deutschland-Ticket aus deinen Einstellungen.
+- **Nur gültige Tickets:** Ein grüner Haken bedeutet: ein Ticket für die ganze Strecke.
+- **„Bei DB prüfen“:** öffnet die Verbindung vorausgefüllt auf bahn.de zum Buchen.
+- **Kalender:** zeigt den günstigsten Preis pro Tag.
+- **Umstiege im Blick:** knappe Umstiege sind rot markiert, Fußwege und echte Wartezeiten
+  stehen im Fahrtverlauf.
+- **Pünktlichkeit aus echten Daten:** wie oft Anschlüsse in den letzten Monaten geklappt
+  haben und wie wahrscheinlich du ≥ 20 min zu spät ankommst (siehe unten).
+- **Filter und Sortierung:** Preis, Dauer, Umstiege, ICE-Anteil, „Nur Original (DB)“,
+  Ankunfts- statt Abfahrtszeit, „Unzuverlässigste zuerst“ und mehr.
+- **Teilen:** Die komplette Ansicht steckt in der URL, ein Link zeigt genau das, was du siehst.
+- **Merken und Vergleichen** einzelner Verbindungen.
+- **Wird mit der Zeit besser:** Die App merkt sich Strecken, Umstiegsbahnhöfe und Preise
+  deiner Suchen und findet auf der Stammstrecke schneller Treffer.
 
-```
-MOTIS / Transitous  →  Routing, Zugläufe, kurze ICE/IC-Segmente, Hubs, Graph
-        ↓                (unbegrenzt & cachebar — läuft von diesem Server)
-lokaler SQLite-Streckengraph  →  Kandidaten erzeugen + vor-ranken
-        ↓
-nur die besten N Kandidaten  →  DB-Vendo (über Wohnanschluss-Gateway)
-                                 →  echter Sparpreis + Ticketabdeckung
-```
+## So benutzt du sie
 
-- **Routing-Provider** (`ROUTING_PROVIDER`): `motis` (Transitous, Default) | `mock`.
-- **Pricing-Provider** (`DB_VENDO_MODE`): `gateway` | `direct` | `dbrest` | `mock` | `off`.
-- Ist Preisprüfung nicht verfügbar, werden trotzdem **echte Fahrplan-Ergebnisse**
-  angezeigt – gekennzeichnet als „Preis nicht geprüft" (kein Rückfall auf Mock).
-- DB-Budget pro Suche ist klein (Schnell 5 / Gründlich 15 / Tief 30); MOTIS-Budget
-  separat und großzügig.
+1. **Stammstrecke einrichten:** In den Einstellungen Start und Ziel eintragen. Pro Seite
+   kannst du mehrere Bahnhöfe anlegen (z. B. einen Hauptbahnhof als Ausweich-Start),
+   sortieren und einzeln abschalten.
+2. **Suchen:** Datum und Zeitfenster wählen. Du siehst zuerst die normalen DB-Verbindungen.
+   - **Schnell:** nutzt vor allem den Cache, sofort Ergebnisse
+   - **Gründlich:** Standard, sucht kurze ICE-Stücke und Alternativen
+   - **Tiefensuche:** systematisch über mehrere Zeitfenster, dauert länger
+3. **Referenz wählen:** Bei deiner Wunschverbindung auf **„Als Referenz“** tippen. Die App
+   sucht dann alle günstigeren Alternativen, die mit denselben Zügen starten.
+4. **Buchen:** Mit **„Bei DB prüfen“** die Verbindung auf bahn.de öffnen und dort buchen.
 
-## Stack
+### Pünktlichkeit
 
-- Next.js 16 (App Router) · TypeScript · Tailwind
-- SQLite (better-sqlite3) + Drizzle ORM als Wissensspeicher
-- Provider-Abstraktion (`RailProvider`): `MotisProvider` (Routing),
-  `DbGatewayProvider` / `DbVendoProvider` / `DbRestProvider` (Pricing), `MockProvider`
-- Rate-Limiter (Concurrency, Spacing, Retry/Backoff+Jitter, Request-Dedup, Circuit-Breaker)
-- Stale-while-revalidate-Caching mit gestaffelten TTLs
-- App-Login (Passwort → signiertes Session-Cookie, 30 Tage gültig), Zugangsschutz in `src/proxy.ts`
-- Residential **DB-Gateway** in `apps/db-gateway` (siehe dessen README + Tailscale-Anleitung)
+Unter **Einstellungen → Pünktlichkeit** lädt ein Knopfdruck die echten Ist-Zeiten
+vergangener Monate für die Bahnhöfe deiner Strecken. Du wählst, wie viele Monate zählen
+und ob dieselbe Jahreszeit aus den Vorjahren dazukommt. Die Daten werden einmal
+ausgewertet und gespeichert, die Suche selbst lädt nichts nach.
 
-## Entwicklung
+Danach zeigt jede Verbindung:
+
+- **Anschluss X %:** wie oft alle Umstiege geklappt hätten
+- **N % weg:** pro Umstieg, wie oft der Anschluss verpasst worden wäre
+- **🎲 Flex Y %:** geschätzte Chance, ≥ 20 min zu spät anzukommen. Dann ist beim Sparpreis
+  die Zugbindung aufgehoben und du darfst einen anderen Zug nehmen.
+
+Das sind Statistiken über die Vergangenheit, keine Vorhersage für einen konkreten Zug.
+
+## Installation
+
+Du brauchst **Node.js 20 oder neuer** (empfohlen 24) und **Python 3**.
 
 ```bash
+git clone https://github.com/TomlDev/sparpreis-explorer.git
+cd sparpreis-explorer
 npm install
-cp .env.example .env      # APP_PASSWORD setzen, AUTH_SECRET erzeugen: openssl rand -hex 32
-python3 -m venv .venv && .venv/bin/pip install curl_cffi duckdb   # curl_cffi: DB_VENDO_MODE=direct, duckdb: Pünktlichkeitsdaten
-npm run db:generate       # Drizzle-Migrationen erzeugen (einmalig / bei Schemaänderung)
-npm run db:migrate
-npm run dev               # http://localhost:3005
-npm test                  # Vitest
+python3 -m venv .venv && .venv/bin/pip install curl_cffi duckdb
+cp .env.example .env
 ```
 
-## Ansicht teilen & reproduzieren
-
-Die Suchseite hält ihren **kompletten Zustand in der URL** (Schema: `src/lib/viewState.ts`):
-Route `o`/`d`, `date`, Zeitfenster `tw`/`tt` (+ `tm=arrival`), `mode`, `sort`, alle vom
-Standard abweichenden Filter als `f.<name>`, Referenz `ref`/`refp`, aufgeklappte Karten
-`open`, Vergleich `cmp` und ein offener Dialog `view`. Der Link-Button in der Topbar kopiert
-ihn; beim Öffnen wird genau diese Ansicht wiederhergestellt (die URL hat Vorrang vor der
-„letzten Suche" im Browser).
-
-Serverseitig lässt sich so ein Link nachvollziehen — nur aus dem Cache, ohne DB-/MOTIS-Abfragen,
-mit derselben Filter-/Sortierlogik wie der Browser (`src/lib/viewFilter.ts`):
+In der `.env` mindestens diese zwei Werte setzen, sonst kann sich niemand einloggen:
 
 ```bash
-npm run view -- 'https://your-domain.example/?o=nrw&d=schwarzwald&date=2026-10-16&tw=03:00&tt=10:00&open=…'
-npm run view -- '<url>' --all    # zusätzlich ausgeblendete Verbindungen mit Grund
-npm run view -- '<url>' --json   # maschinenlesbar
+APP_PASSWORD=ein-langes-passwort
+AUTH_SECRET=...   # erzeugen mit: openssl rand -hex 32
 ```
 
-## Produktion
+Starten:
 
 ```bash
 npm run build
-npm run start             # oder via PM2:
-pm2 start ecosystem.config.cjs
+npm run start             # http://localhost:3005
 ```
 
-Die App lauscht nur auf `127.0.0.1:3005` und ist ausschließlich über Apache (TLS,
-`ProxyPreserveHost On`) erreichbar. Das ist Voraussetzung für den Login-Schutz: Die Sperre
-nach 10 Fehlversuchen nimmt die IP aus dem **letzten** `X-Forwarded-For`-Eintrag, den
-Apache anhängt. Sicherheits-Header (CSP, HSTS, Permissions-Policy …) setzt `next.config.mjs`.
+Zum Ausprobieren ganz ohne Netzabfragen gibt es Demodaten:
+`ROUTING_PROVIDER=mock` und `DB_VENDO_MODE=mock` in der `.env`.
 
-PM2 läuft als systemd-Dienst (`pm2-<user>`) mit `NoNewPrivileges` — nie `pm2 kill`, sondern
-`pm2 restart bahnfinder` bzw. bei geänderten Start-Argumenten
-`pm2 delete bahnfinder && pm2 start ecosystem.config.cjs --only bahnfinder && pm2 save`.
+**Auf einem Server:** Die App sollte nur lokal lauschen (`npm run start -- -H 127.0.0.1`) und
+über einen Reverse-Proxy mit HTTPS erreichbar sein (z. B. Apache oder nginx). Das Login-Cookie
+funktioniert nur über HTTPS oder auf `localhost`. Für den Dauerbetrieb liegt eine
+PM2-Konfiguration bei (`pm2 start ecosystem.config.cjs`).
 
-Docker:
+## Einstellungen in der `.env`
+
+| Variable | Bedeutung |
+|---|---|
+| `APP_PASSWORD` | Passwort für den Login |
+| `AUTH_SECRET` | Geheimer Schlüssel für das Login-Cookie (mind. 32 Zeichen) |
+| `DB_VENDO_MODE` | Preisquelle: `direct` (echte DB-Preise, Standard), `mock` (Demo), `off` (nur Fahrplan) |
+| `ROUTING_PROVIDER` | Fahrplanquelle: `motis` (Transitous, Standard) oder `mock` |
+| `RAIL_USER_AGENT` | Kennung für Anfragen, bitte mit eigener Kontaktadresse |
+
+Die App fragt die DB nur sparsam ab: Ergebnisse werden zwischengespeichert, und es gibt ein
+Tageslimit. Wer sie selbst betreibt, ist für die Einhaltung der Nutzungsbedingungen der
+genutzten Dienste verantwortlich.
+
+## Für Entwickler
 
 ```bash
-docker compose up -d --build
+npm run dev                          # Entwicklungsserver
+npm test                             # Tests
+npm run view -- '<geteilter Link>'   # zeigt eine geteilte Ansicht im Terminal an
 ```
 
-## Provider-Konfiguration
+## Datenquellen und Lizenz
 
-Routing (`ROUTING_PROVIDER`): `motis` (Default, läuft von diesem Server) | `mock`.
+- Fahrpläne: [Transitous](https://transitous.org) (MOTIS)
+- Preise: DB-Schnittstellen über [db-vendo-client](https://github.com/public-transport/db-vendo-client)
+- Pünktlichkeit: [piebro/deutsche-bahn-data](https://huggingface.co/datasets/piebro/deutsche-bahn-data)
+  (Deutsche Bahn, CC BY 4.0)
 
-Pricing (`DB_VENDO_MODE`):
-
-| Wert      | Quelle                                   | Hinweis |
-|-----------|------------------------------------------|---------|
-| `gateway` | Residential DB-Gateway (`DB_VENDO_GATEWAY_URL`+`_TOKEN`) | Empfohlen. Umgeht den IP-Block. |
-| `direct`  | Direkt DB via `db-vendo-client`          | Aus Rechenzentrums-IPs `OPS_BLOCKED`. |
-| `dbrest`  | `db-rest` v6-Instanz (`DB_REST_BASE`)    | Nur wenn erreichbare Instanz vorhanden. |
-| `mock`    | Offline-Demodaten                        | Tests & Dev. |
-| `off`     | keine Preisprüfung                       | Nur Fahrplan, „Preis nicht geprüft". |
-
-> **Aktueller Livebetrieb:** `ROUTING_PROVIDER=motis` + `DB_VENDO_MODE=direct` →
-> echte Fahrpläne **und echte DB-Sparpreise direkt vom Server.**
->
-> **Wichtig – `OPS_BLOCKED` war kein IP-Block:** Akamai blockt den *TLS-Fingerprint*
-> von Node/plain-curl (HTTP 452), unabhängig von der IP. Lösung: db-vendo-client
-> schickt seine Requests über einen **TLS-impersonierenden Transport**
-> (`curl_cffi`/Chrome via `scripts/db_impersonate.py`, eingehängt über
-> `profile.request` in `src/lib/rail/impersonate.ts`, dbnav-Profil). curl_cffi liegt
-> im venv `/srv/bahn-finder/.venv` (`DB_IMPERSONATE_PYTHON`). Kein Gateway/VPN/
-> Mobilfunk nötig. Setup: `python3 -m venv .venv && .venv/bin/pip install curl_cffi`.
-> Kein VPN einsetzen – VPN-/Rechenzentrums-Ranges sind genau das, was DB reaktiv
-> IP-sperrt; Impersonation + sparsames, gecachtes Volumen ist der bessere Schutz.
-> Fallback bleibt das Residential-Gateway (`apps/db-gateway`, `DB_VENDO_MODE=gateway`).
-
-## Suchmodi & Budget
-
-- **Schnell** (≈10 Requests): Cache + wenige Abfragen, erste Ergebnisse sofort.
-- **Gründlich** (≈40): Standard – Fallback-Start, bekannte kurze ICE/IC-Segmente, VIA-Varianten.
-- **Tiefensuche** (≈120): systematisch, mehrere Zeitfenster, Fortschrittsanzeige, abbrechbar.
-
-Der Preis in der App ist **keine verbindliche Buchungsgarantie** – „Bei DB prüfen“
-öffnet bahn.de mit vorbelegter Verbindung.
-
-## Pünktlichkeit (Open Data)
-
-Unter **Einstellungen → Pünktlichkeit** lädt ein Knopfdruck die echten Ist-Zeiten
-vergangener Monate aus [piebro/deutsche-bahn-data](https://huggingface.co/datasets/piebro/deutsche-bahn-data)
-(DB Timetables API, CC BY 4.0). Wählbar sind die letzten 1–12 Monate und optional dieselbe
-Jahreszeit aus Vor- und Vorvorjahr. `scripts/delay_ingest.py` (Python + DuckDB) lädt jeden
-Monat (~600 MB) temporär nach `data/delay-tmp/`, aggregiert ihn für die Bahnhöfe aus deinen
-Suchen zu kompakten Verspätungs-Histogrammen (Zug → Linie+Stunde → Linie → Bahnhof,
-Wochentagsgruppe, Ausfälle) in SQLite und löscht die Rohdatei wieder. Die Suche liest nur
-noch diese Tabellen.
-
-Pro Verbindung zeigt die App daraus **Anschluss-Chance**, Verpass-Wahrscheinlichkeit je
-Umstieg und **Flex-Chance**, also die geschätzte Wahrscheinlichkeit, ≥ 20 min zu spät
-anzukommen (dann ist die Zugbindung aufgehoben). Dazu gibt es die Sortierung „Unzuverlässigste“
-und einen Mindest-Flex-Filter. Die Gewichtung (Halbwertszeit, Saison, Wochentag,
-Mindest-Beobachtungen) lässt sich ohne neuen Import ändern. Alles sind Schätzungen aus
-vergangenen Monaten, keine Aussage über einen konkreten Zug. Python-Pfad: `DELAY_PYTHON`
-(Standard `DB_IMPERSONATE_PYTHON`).
-
-## Lizenz
-
-[MIT](LICENSE) © 2026 TomlDev
+Code unter [MIT-Lizenz](LICENSE) © 2026 TomlDev
