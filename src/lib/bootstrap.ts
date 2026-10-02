@@ -4,6 +4,7 @@ import path from "node:path";
 import { db } from "@/db/client";
 import { ensureDefaultProfiles } from "@/lib/routeProfiles";
 import { pruneCache } from "@/lib/cache/cache";
+import { startMailPolling } from "@/lib/trips/mailSync";
 
 let ready = false;
 let pruneStarted = false;
@@ -34,7 +35,8 @@ export function ensureReady(): void {
       } catch {
         // ignore prune errors
       }
-    }, 60 * 60 * 1000);
+    }, 60 * 60 * 1000).unref(); // don't keep scripts/tests alive
+    startMailPolling();
   }
   ready = true;
 }

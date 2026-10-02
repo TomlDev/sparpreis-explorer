@@ -1,0 +1,334 @@
+import fs from "node:fs";
+import path from "node:path";
+import { and, asc, desc, eq, gte, lte } from "drizzle-orm";
+import { db } from "@/db/client";
+import {
+  attachments,
+  claims,
+  tripEvents,
+  trips,
+  type AttachmentRow,
+  type ClaimRow,
+  type TripEventRow,
+  type TicketInfo,
+  type TripLeg,
+  type TripRow,
+} from "@/db/schema";
+import { newId, now } from "@/db/util";
+import { formatInTimeZone } from "date-fns-tz";
+
+const TZ = "Europe/Berlin";
+
+export const TRIP_STATUSES = ["planned", "done", "delayed", "aborted", "not_started", "cancelled"] as const;
+export type TripStatus = (typeof TRIP_STATUSES)[number];
+
+export interface TripInput {
+  date?: string;
+  legs: TripLeg[];
+  source?: string;
+  fingerprint?: string | null;
+  refreshToken?: string | null;
+  orderNumber?: string | null;
+  price?: number | null;
+  klasse?: number | null;
+  ticketType?: string | null;
+  direction?: string | null;
+  ticket?: TicketInfo | null;
+  roundTrip?: boolean;
+  notes?: string | null;
+}
+
+export interface TripDetail extends TripRow {
+  events: TripEventRow[];
+  attachments: AttachmentRow[];
+  claims: ClaimRow[];
+}
+
+const rideLegs = (legs: TripLeg[]) => legs.filter((l) => !l.isWalking);
+
+function summary(legs: TripLeg[]) {
+  const rides = rideLegs(legs);
+  const first = rides[0] ?? legs[0];
+  const last = rides[rides.length - 1] ?? legs[legs.length - 1];
+  return {
+    originName: first?.fromName ?? "?",
+    destName: last?.toName ?? "?",
+    plannedDeparture: first?.plannedDeparture ?? null,
+    plannedArrival: last?.plannedArrival ?? null,
+  };
+}
+
+export function dayOf(iso: string | null | undefined): string | null {
+  return iso ? formatInTimeZone(new Date(iso), TZ, "yyyy-MM-dd") : null;
+}
+
+export function createTrip(input: TripInput): TripRow {
+  if (!input.legs?.length) throw new Error("Fahrt ohne Abschnitte");
+  const s = summary(input.legs);
+  const date = input.date ?? dayOf(s.plannedDeparture);
+  if (!date) throw new Error("Datum fehlt");
+  // Same connection twice (e.g. "Gebucht" tapped again) → keep the existing one.
+  if (input.fingerprint) {
+    const dup = db
+      .select()
+      .from(trips)
+      .where(and(eq(trips.fingerprint, input.fingerprint), eq(trips.date, date)))
+      .get();
+    if (dup) return dup;
+  }
+  const row: TripRow = {
+    id: newId("trip"),
+    date,
+    ...s,
+    legs: input.legs,
+    status: "planned",
+    source: input.source ?? "manual",
+    fingerprint: input.fingerprint ?? null,
+    refreshToken: input.refreshToken ?? null,
+    orderNumber: input.orderNumber ?? null,
+    price: input.price ?? null,
+    klasse: input.klasse ?? null,
+    ticketType: input.ticketType ?? null,
+    direction: input.direction ?? null,
+    ticket: input.ticket ?? null,
+    actualArrival: null,
+    actualLegs: null,
+    abortedAt: null,
+    expectedDelayMin: null,
+    returnedToStart: false,
+    roundTrip: input.roundTrip ?? false,
+    notes: input.notes ?? null,
+    createdAt: now(),
+    updatedAt: now(),
+  };
+  db.insert(trips).values(row).run();
+  return row;
+}
+
+export function listTrips(from: string, to: string): TripRow[] {
+  return db
+    .select()
+    .from(trips)
+    .where(and(gte(trips.date, from), lte(trips.date, to)))
+    .orderBy(asc(trips.date), asc(trips.plannedDeparture))
+    .all();
+}
+
+export function getTrip(id: string): TripDetail | null {
+  const t = db.select().from(trips).where(eq(trips.id, id)).get();
+  if (!t) return null;
+  return {
+    ...t,
+    events: db.select().from(tripEvents).where(eq(tripEvents.tripId, id)).orderBy(asc(tripEvents.at)).all(),
+    attachments: db.select().from(attachments).where(eq(attachments.tripId, id)).orderBy(asc(attachments.createdAt)).all(),
+    claims: db.select().from(claims).where(eq(claims.tripId, id)).orderBy(desc(claims.createdAt)).all(),
+  };
+}
+
+const EDITABLE = [
+  "status",
+  "orderNumber",
+  "price",
+  "klasse",
+  "ticketType",
+  "direction",
+  "actualArrival",
+  "actualLegs",
+  "abortedAt",
+  "expectedDelayMin",
+  "returnedToStart",
+  "roundTrip",
+  "ticket",
+  "notes",
+  "legs",
+] as const;
+type Editable = (typeof EDITABLE)[number];
+
+export function updateTrip(id: string, patch: Partial<Pick<TripRow, Editable>>): TripRow | null {
+  const set: Partial<TripRow> = { updatedAt: now() };
+  for (const k of EDITABLE) if (patch[k] !== undefined) (set as Record<string, unknown>)[k] = patch[k];
+  if (set.status && !(TRIP_STATUSES as readonly string[]).includes(set.status)) throw new Error("ungültiger Status");
+  if (set.legs) Object.assign(set, summary(set.legs), { date: dayOf(summary(set.legs).plannedDeparture) ?? undefined });
+  db.update(trips).set(set).where(eq(trips.id, id)).run();
+  return db.select().from(trips).where(eq(trips.id, id)).get() ?? null;
+}
+
+export function deleteTrip(id: string): void {
+  if (!db.select().from(trips).where(eq(trips.id, id)).get()) return;
+  for (const a of db.select().from(attachments).where(eq(attachments.tripId, id)).all()) removeFile(a.path);
+  db.delete(trips).where(eq(trips.id, id)).run();
+  // Our own id format only (never a path from outside).
+  if (/^trip_[0-9a-f-]{36}$/.test(id)) fs.rmSync(path.join(/*turbopackIgnore: true*/ uploadsDir(), id), { recursive: true, force: true });
+}
+
+// ---- events (Kontrolle, Notiz, …) ----
+
+/** Ride (non-walking leg) the passenger was on at time `at` (planned times;
+ *  after a leg's arrival we still attribute to it until the next departs). */
+export function legAt(legs: TripLeg[], at: number): number | null {
+  let idx: number | null = null;
+  legs.forEach((l, i) => {
+    if (l.isWalking || !l.plannedDeparture) return;
+    if (new Date(l.plannedDeparture).getTime() - 5 * 60_000 <= at) idx = i;
+  });
+  return idx;
+}
+
+export function addEvent(
+  tripId: string,
+  e: { type: string; at?: number; lat?: number | null; lng?: number | null; accuracy?: number | null; text?: string | null; legIndex?: number | null },
+): TripEventRow {
+  const t = db.select().from(trips).where(eq(trips.id, tripId)).get();
+  if (!t) throw new Error("Fahrt nicht gefunden");
+  const at = e.at ?? now();
+  const row: TripEventRow = {
+    id: newId("ev"),
+    tripId,
+    type: e.type,
+    at,
+    lat: e.lat ?? null,
+    lng: e.lng ?? null,
+    accuracy: e.accuracy ?? null,
+    legIndex: e.legIndex ?? legAt(t.legs, at),
+    text: e.text ?? null,
+    createdAt: now(),
+  };
+  db.insert(tripEvents).values(row).run();
+  return row;
+}
+
+export function updateEvent(
+  id: string,
+  patch: { at?: number; lat?: number | null; lng?: number | null; accuracy?: number | null; text?: string | null },
+): TripEventRow | null {
+  const e = db.select().from(tripEvents).where(eq(tripEvents.id, id)).get();
+  if (!e) return null;
+  const set: Partial<TripEventRow> = {};
+  for (const k of ["at", "lat", "lng", "accuracy", "text"] as const) if (patch[k] !== undefined) (set as Record<string, unknown>)[k] = patch[k];
+  if (set.at !== undefined) {
+    const t = db.select().from(trips).where(eq(trips.id, e.tripId)).get();
+    if (t) set.legIndex = legAt(t.legs, set.at);
+  }
+  db.update(tripEvents).set(set).where(eq(tripEvents.id, id)).run();
+  return db.select().from(tripEvents).where(eq(tripEvents.id, id)).get() ?? null;
+}
+
+export function deleteEvent(id: string): void {
+  db.delete(tripEvents).where(eq(tripEvents.id, id)).run();
+}
+
+// ---- attachments ----
+
+export function uploadsDir(): string {
+  const p = process.env.DATABASE_PATH || "./data/bahn-finder.db";
+  const abs = path.isAbsolute(p) ? p : path.join(/*turbopackIgnore: true*/ process.cwd(), p);
+  return path.join(/*turbopackIgnore: true*/ path.dirname(abs), "uploads");
+}
+
+const MIME_EXT: Record<string, string> = {
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+  "image/heic": "heic",
+  "image/heif": "heif",
+  "image/gif": "gif",
+  "application/pdf": "pdf",
+};
+export const MAX_UPLOAD = 20 * 1024 * 1024;
+
+export function saveAttachment(
+  tripId: string | null,
+  file: { name: string; type: string; bytes: Buffer },
+  kind: string,
+  caption?: string | null,
+): AttachmentRow {
+  const ext = MIME_EXT[file.type];
+  if (!ext) throw new Error(`Dateityp nicht erlaubt: ${file.type || "unbekannt"}`);
+  if (file.bytes.length > MAX_UPLOAD) throw new Error("Datei zu groß (max. 20 MB)");
+  const id = newId("att");
+  const rel = `${tripId ?? "_inbox"}/${id}.${ext}`; // relative to uploadsDir()
+  const abs = path.join(/*turbopackIgnore: true*/ uploadsDir(), rel);
+  fs.mkdirSync(path.dirname(abs), { recursive: true, mode: 0o700 });
+  fs.writeFileSync(abs, file.bytes, { mode: 0o600 });
+  const row: AttachmentRow = {
+    id,
+    tripId,
+    kind,
+    filename: file.name.replace(/[^\p{L}\p{N}._ -]/gu, "_").slice(0, 120) || `${id}.${ext}`,
+    mime: file.type,
+    size: file.bytes.length,
+    path: rel,
+    caption: caption ?? null,
+    takenAt: null,
+    createdAt: now(),
+  };
+  db.insert(attachments).values(row).run();
+  return row;
+}
+
+export function getAttachment(id: string): (AttachmentRow & { abs: string }) | null {
+  const a = db.select().from(attachments).where(eq(attachments.id, id)).get();
+  if (!a) return null;
+  const abs = path.join(/*turbopackIgnore: true*/ uploadsDir(), a.path);
+  // Paths are generated by us, but never serve anything outside the uploads dir.
+  if (!abs.startsWith(uploadsDir() + path.sep)) return null;
+  return { ...a, abs };
+}
+
+function removeFile(rel: string) {
+  const abs = path.join(/*turbopackIgnore: true*/ uploadsDir(), rel);
+  if (abs.startsWith(uploadsDir() + path.sep)) fs.rmSync(abs, { force: true });
+}
+
+export function deleteAttachment(id: string): void {
+  const a = db.select().from(attachments).where(eq(attachments.id, id)).get();
+  if (!a) return;
+  removeFile(a.path);
+  db.delete(attachments).where(eq(attachments.id, id)).run();
+}
+
+// ---- today ----
+
+/** Trips relevant right now: today's trips plus any still running (overnight). */
+export function currentTrips(at = now()): TripRow[] {
+  const today = formatInTimeZone(new Date(at), TZ, "yyyy-MM-dd");
+  const yesterday = formatInTimeZone(new Date(at - 86_400_000), TZ, "yyyy-MM-dd");
+  return listTrips(yesterday, today).filter((t) => {
+    if (t.date === today) return true;
+    const arr = t.plannedArrival ? new Date(t.plannedArrival).getTime() : 0;
+    return arr + 3 * 3600_000 > at; // yesterday's trip still under way
+  });
+}
+
+// ---- claims ----
+
+export function saveClaim(
+  tripId: string,
+  c: Partial<Omit<ClaimRow, "id" | "tripId" | "createdAt" | "updatedAt">> & { id?: string },
+): ClaimRow {
+  if (c.id) {
+    const { id, ...rest } = c;
+    db.update(claims)
+      .set({ ...rest, updatedAt: now() })
+      .where(and(eq(claims.id, id), eq(claims.tripId, tripId)))
+      .run();
+    return db.select().from(claims).where(eq(claims.id, id)).get()!;
+  }
+  const row: ClaimRow = {
+    id: newId("claim"),
+    tripId,
+    type: c.type ?? "delay",
+    status: c.status ?? "draft",
+    delayMin: c.delayMin ?? null,
+    amount: c.amount ?? null,
+    payout: c.payout ?? "transfer",
+    submittedAt: c.submittedAt ?? null,
+    paidAt: c.paidAt ?? null,
+    paidAmount: c.paidAmount ?? null,
+    notes: c.notes ?? null,
+    createdAt: now(),
+    updatedAt: now(),
+  };
+  db.insert(claims).values(row).run();
+  return row;
+}

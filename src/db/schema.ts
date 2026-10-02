@@ -508,6 +508,146 @@ export const delayStations = sqliteTable(
   }),
 );
 
+// ---------------------------------------------------------------------------
+// Travel diary: booked trips, what actually happened, evidence, claims.
+// ---------------------------------------------------------------------------
+export interface TripLeg {
+  product?: string;
+  lineName?: string;
+  trainNumber?: string;
+  fromId?: string | null;
+  fromName: string;
+  toId?: string | null;
+  toName: string;
+  plannedDeparture: string | null;
+  plannedArrival: string | null;
+  isWalking?: boolean;
+  depPlatform?: string | null;
+  arrPlatform?: string | null;
+}
+
+/** What the ticket itself says (from the DB ticket PDF / booking mail). */
+export interface TicketInfo {
+  tariff?: string | null; // "Super Sparpreis (Einfache Fahrt)"
+  bahncard?: string | null; // "BC25"
+  travellers?: string | null; // "1 Person (27-64 Jahre)"
+  /** Ticket's own start/destination ("Bochum+City"). */
+  from?: string | null;
+  to?: string | null;
+  /** Trains the ticket is bound to ("ICE 927, 14:49 Uhr am 05.10.2026"). */
+  zugbindung?: string[];
+  validity?: string | null;
+  bookedAt?: string | null;
+  traveller?: string | null;
+}
+
+export const trips = sqliteTable(
+  "trips",
+  {
+    id: text("id").primaryKey(),
+    /** Travel day (yyyy-MM-dd, Europe/Berlin). */
+    date: text("date").notNull(),
+    originName: text("origin_name").notNull(),
+    destName: text("dest_name").notNull(),
+    plannedDeparture: text("planned_departure"),
+    plannedArrival: text("planned_arrival"),
+    legs: text("legs", { mode: "json" }).$type<TripLeg[]>().notNull(),
+    // planned | done | delayed | aborted | not_started | cancelled
+    status: text("status").notNull().default("planned"),
+    // search | pdf | email | db | manual
+    source: text("source").notNull().default("manual"),
+    fingerprint: text("fingerprint"),
+    refreshToken: text("refresh_token"),
+    orderNumber: text("order_number"), // DB Auftragsnummer
+    price: real("price"),
+    klasse: integer("klasse"),
+    ticketType: text("ticket_type"), // Sparpreis, Flexpreis, …
+    /** Ticket is the outbound or return part of a round trip. */
+    direction: text("direction"), // outbound | return
+    ticket: text("ticket", { mode: "json" }).$type<TicketInfo>(),
+    /** What actually happened. */
+    actualArrival: text("actual_arrival"), // ISO, at the ticket's destination
+    actualLegs: text("actual_legs", { mode: "json" }).$type<TripLeg[]>(),
+    abortedAt: text("aborted_at"), // station where the trip was broken off
+    /** Delay announced at the destination when deciding to abort / not travel. */
+    expectedDelayMin: integer("expected_delay_min"),
+    returnedToStart: integer("returned_to_start", { mode: "boolean" }).notNull().default(false),
+    /** Price is for a round-trip ticket (claims use half of it). */
+    roundTrip: integer("round_trip", { mode: "boolean" }).notNull().default(false),
+    notes: text("notes"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (t) => ({
+    byDate: index("trips_date_idx").on(t.date),
+    byOrder: index("trips_order_idx").on(t.orderNumber),
+  }),
+);
+
+export const tripEvents = sqliteTable(
+  "trip_events",
+  {
+    id: text("id").primaryKey(),
+    tripId: text("trip_id")
+      .notNull()
+      .references(() => trips.id, { onDelete: "cascade" }),
+    type: text("type").notNull(), // control | note | delay | abort | arrival
+    at: integer("at").notNull(), // epoch ms
+    lat: real("lat"),
+    lng: real("lng"),
+    accuracy: real("accuracy"),
+    legIndex: integer("leg_index"),
+    text: text("text"),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => ({ byTrip: index("trip_events_trip_idx").on(t.tripId, t.at) }),
+);
+
+export const attachments = sqliteTable(
+  "attachments",
+  {
+    id: text("id").primaryKey(),
+    tripId: text("trip_id").references(() => trips.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull(), // screenshot | ticket | receipt | claim | other
+    filename: text("filename").notNull(),
+    mime: text("mime").notNull(),
+    size: integer("size").notNull(),
+    path: text("path").notNull(), // relative to data/uploads
+    caption: text("caption"),
+    takenAt: integer("taken_at"),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => ({ byTrip: index("attachments_trip_idx").on(t.tripId) }),
+);
+
+export const claims = sqliteTable(
+  "claims",
+  {
+    id: text("id").primaryKey(),
+    tripId: text("trip_id")
+      .notNull()
+      .references(() => trips.id, { onDelete: "cascade" }),
+    // delay | not_started | aborted_return | aborted_partial | extra_costs
+    type: text("type").notNull(),
+    status: text("status").notNull().default("draft"), // draft | submitted | paid | rejected
+    delayMin: integer("delay_min"),
+    amount: real("amount"),
+    payout: text("payout").notNull().default("transfer"), // transfer | voucher
+    submittedAt: integer("submitted_at"),
+    paidAt: integer("paid_at"),
+    paidAmount: real("paid_amount"),
+    notes: text("notes"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (t) => ({ byTrip: index("claims_trip_idx").on(t.tripId) }),
+);
+
+export type TripRow = typeof trips.$inferSelect;
+export type TripEventRow = typeof tripEvents.$inferSelect;
+export type AttachmentRow = typeof attachments.$inferSelect;
+export type ClaimRow = typeof claims.$inferSelect;
+
 export type LocationRow = typeof locations.$inferSelect;
 export type JourneyRow = typeof journeys.$inferSelect;
 export type JourneyLegRow = typeof journeyLegs.$inferSelect;

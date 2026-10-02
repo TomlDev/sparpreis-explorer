@@ -22,6 +22,24 @@ zeigt dir nur, was tatsächlich buchbar ist.
 
 ## Was die App kann
 
+**Reisen festhalten und Entschädigung holen**
+
+- **Kalender mit all deinen Fahrten:** aus der Suche per „Gebucht“ oder von Hand eingetragen.
+- **Heute-Leiste:** Hast du heute eine Fahrt, zeigt jede Seite oben, in welchem Zug du
+  gerade sitzt und wie es weitergeht.
+- **„Kontrolliert“:** speichert Zeit und Standort einer Fahrkartenkontrolle (beliebig oft
+  pro Fahrt) und ordnet sie dem richtigen Zug zu.
+- **Screenshots und Belege** direkt vom Handy zur Fahrt hochladen, z. B. die
+  Verspätungsprognose aus dem DB Navigator.
+- **Was wirklich passiert ist:** pünktlich, verspätet (mit echter Ankunftszeit),
+  abgebrochen, nicht angetreten oder Zugausfall, dazu wie du tatsächlich gefahren bist.
+- **Fahrgastrechte auf Knopfdruck:** Die App rechnet nach den Regeln der DB aus, was dir
+  zusteht (25 % ab 60 min, 50 % ab 120 min, Erstattung bei Nichtantritt oder Abbruch), und
+  erzeugt das **offizielle DB-Formular fertig ausgefüllt** mit deinen Daten. Du unterschreibst
+  nur noch. Name, Adresse und IBAN liegen verschlüsselt auf dem Server.
+
+**Günstige Tickets finden**
+
 - **Günstigere Alternativen zu deiner Wunschverbindung:** Du wählst eine Verbindung als
   Referenz, die App sucht alle billigeren Varianten mit denselben ersten Zügen.
 - **Echte Sparpreise:** Jeder angezeigte Preis kommt direkt von der DB, inklusive BahnCard,

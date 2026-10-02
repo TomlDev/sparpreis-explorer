@@ -3,6 +3,7 @@
 import * as React from "react";
 import {
   ArrowUpRight,
+  CalendarPlus,
   Check,
   ChevronDown,
   ChevronRight,
@@ -104,6 +105,7 @@ export function ResultCard({
   const open = openProp ?? openLocal;
   const [history, setHistory] = React.useState<PriceRow[] | null>(null);
   const [saved, setSaved] = React.useState(false);
+  const [bookedId, setBookedId] = React.useState<string | null>(null);
   const [copied, setCopied] = React.useState(false);
   const m = r.metrics;
 
@@ -165,6 +167,35 @@ export function ResultCard({
         data: { chainLabel: r.chainLabel, headlineFv: r.headlineFv, travelDate },
       }),
     }).catch(() => setSaved(false));
+  }
+
+  /** "Gebucht": put this connection into the travel calendar. */
+  async function markBooked() {
+    const res = await fetch("/api/trips", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        source: "search",
+        fingerprint: r.fingerprint,
+        refreshToken: r.refreshToken,
+        price: r.coverage.price,
+        klasse: r.coverage.klasse === 1 ? 1 : 2,
+        ticketType: r.coverage.price != null ? "Sparpreis" : null,
+        legs: r.legs.map((l) => ({
+          product: l.product,
+          lineName: l.lineName,
+          trainNumber: l.trainNumber,
+          fromId: l.fromId,
+          fromName: l.fromName,
+          toId: l.toId,
+          toName: l.toName,
+          plannedDeparture: l.plannedDeparture,
+          plannedArrival: l.plannedArrival,
+          isWalking: l.isWalking,
+        })),
+      }),
+    });
+    if (res.ok) setBookedId((await res.json()).trip.id);
   }
 
   const dbHref = bahnDeLink(m.originName, m.destinationName, m.plannedDeparture, {
@@ -291,6 +322,24 @@ export function ResultCard({
           >
             <Star className={cn("h-4 w-4", saved && "fill-warning text-warning")} /> {saved ? "Gemerkt" : "Merken"}
           </Button>
+          {bookedId ? (
+            <a href={`/reisen/${bookedId}`} onClick={(e) => e.stopPropagation()} className="text-sm font-medium text-success underline">
+              Im Kalender ✓
+            </a>
+          ) : (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-muted-foreground"
+              title="Ich habe diese Verbindung gebucht – in meine Reisen übernehmen"
+              onClick={(e) => {
+                e.stopPropagation();
+                markBooked();
+              }}
+            >
+              <CalendarPlus className="h-4 w-4" /> Gebucht
+            </Button>
+          )}
           {isReference ? (
             <Badge variant="primary">Referenz</Badge>
           ) : (

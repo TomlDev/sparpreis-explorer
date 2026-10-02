@@ -36,6 +36,20 @@
       "when": 1790339202485,
       "tag": "0004_same_jack_power",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1790967588683,
+      "tag": "0005_awesome_war_machine",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1790968786291,
+      "tag": "0006_dusty_thunderbolt",
+      "breakpoints": true
     }
   ]
 }

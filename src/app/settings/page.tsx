@@ -3,7 +3,9 @@
 import * as React from "react";
 import { Check, ChevronDown, ChevronUp, Plus, Trash2 } from "lucide-react";
 import { AppHeader } from "@/components/AppHeader";
+import { ClaimantCard } from "@/components/ClaimantCard";
 import { DelayDataCard } from "@/components/DelayDataCard";
+import { MailSyncCard } from "@/components/MailSyncCard";
 import { Badge, Button, Card, Input, Spinner, Switch } from "@/components/ui";
 import { formatAgo } from "@/lib/time";
 
@@ -97,6 +99,10 @@ export default function SettingsPage() {
         <h1 className="text-xl font-semibold">Einstellungen</h1>
 
         <PreferencesCard />
+
+        <ClaimantCard />
+
+        <MailSyncCard />
 
 
         {/* Default route */}
