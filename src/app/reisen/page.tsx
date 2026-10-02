@@ -43,12 +43,14 @@ export default function TripsPage() {
       .then((r) => r.json())
       .catch(() => ({ results: [] }));
     setImporting(false);
-    type R = { file: string; error?: string; created?: TripRow[]; updated?: TripRow[]; warnings?: string[] };
+    type R = { file: string; error?: string; created?: TripRow[]; updated?: TripRow[]; warnings?: string[]; claims?: unknown[]; skipped?: string };
     const results = (d.results ?? []) as R[];
     const created = results.flatMap((r) => r.created ?? []);
     const updated = results.flatMap((r) => r.updated ?? []);
     const errors = results.filter((r) => r.error).map((r) => `${r.file}: ${r.error}`);
     const warn = results.flatMap((r) => r.warnings ?? []);
+    const claimCount = results.reduce((n, r) => n + (r.claims?.length ?? 0), 0);
+    const skipped = results.flatMap((r) => (r.skipped ? [r.skipped] : []));
     const first = created[0] ?? updated[0];
     if (first) setMonth(first.date.slice(0, 7));
     setImportMsg({
@@ -56,6 +58,8 @@ export default function TripsPage() {
       text: [
         created.length ? `${created.length} Fahrt(en) importiert` : "",
         updated.length ? `${updated.length} aktualisiert` : "",
+        claimCount ? `${claimCount} Fahrgastrechte-Antrag/-Bescheid übernommen` : "",
+        ...skipped,
         ...warn,
         ...errors,
       ]
@@ -112,6 +116,7 @@ export default function TripsPage() {
           </div>
         </div>
         {importMsg && <p className={cn("text-sm", importMsg.ok ? "text-success" : "text-danger")}>{importMsg.text}</p>}
+        <ClaimsSummary key={trips.length + (importMsg?.text ?? "")} />
         {adding && (
           <AddTrip
             onDone={(t) => {
@@ -281,6 +286,61 @@ function AddTrip({ onDone }: { onDone: (t: TripRow | null) => void }) {
           Abbrechen
         </Button>
       </div>
+    </Card>
+  );
+}
+
+interface ClaimsOverview {
+  paidTotal: number;
+  paidCount: number;
+  pending: number;
+  drafts: number;
+  rejected: number;
+  claims: { id: string; caseId: string | null; status: string; paidAmount: number | null; amount: number | null; tripId: string; date: string; route: string }[];
+}
+
+const CLAIM_LABEL: Record<string, string> = { draft: "Formular erstellt", submitted: "eingereicht", paid: "ausgezahlt", rejected: "abgelehnt" };
+
+/** Passenger-rights overview: money received, open and rejected claims. */
+function ClaimsSummary() {
+  const [d, setD] = React.useState<ClaimsOverview | null>(null);
+  const [open, setOpen] = React.useState(false);
+  React.useEffect(() => {
+    fetch("/api/claims")
+      .then((r) => r.json())
+      .then(setD)
+      .catch(() => {});
+  }, []);
+  if (!d || d.claims.length === 0) return null;
+  return (
+    <Card className="p-3 sm:p-4">
+      <button className="flex w-full flex-wrap items-baseline gap-x-3 gap-y-1 text-left text-sm" onClick={() => setOpen((o) => !o)}>
+        <span className="font-semibold">Fahrgastrechte</span>
+        <span className="font-semibold text-success">{formatEuro(d.paidTotal)} erstattet</span>
+        {d.pending > 0 && <span>{d.pending} offen</span>}
+        {d.drafts > 0 && <span className="text-muted-foreground">{d.drafts} noch nicht eingereicht</span>}
+        {d.rejected > 0 && <span className="text-danger">{d.rejected} abgelehnt</span>}
+        <span className="ml-auto text-xs text-muted-foreground">{open ? "ausblenden" : `${d.claims.length} Anträge anzeigen`}</span>
+      </button>
+      {open && (
+        <div className="mt-2 divide-y divide-border text-sm">
+          {d.claims.map((c) => (
+            <Link key={c.id} href={`/reisen/${c.tripId}`} className="flex flex-wrap items-center gap-x-3 py-1.5 hover:bg-muted/40">
+              <span className="w-20 tabular-nums text-muted-foreground">{new Date(`${c.date}T12:00:00Z`).toLocaleDateString("de-DE")}</span>
+              <span className="min-w-0 flex-1 truncate">{c.route}</span>
+              <span
+                className={cn(
+                  "text-xs",
+                  c.status === "paid" ? "text-success" : c.status === "rejected" ? "text-danger" : "text-muted-foreground",
+                )}
+              >
+                {CLAIM_LABEL[c.status] ?? c.status}
+                {c.status === "paid" && c.paidAmount != null ? ` ${formatEuro(c.paidAmount)}` : ""}
+              </span>
+            </Link>
+          ))}
+        </div>
+      )}
     </Card>
   );
 }

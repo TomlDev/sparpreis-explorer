@@ -208,14 +208,24 @@ export function parseTicketText(text: string): ParsedBooking {
 }
 
 /** Fallback facts from the HTML booking confirmation. */
-export function parseBookingHtml(html: string): Partial<ParsedBooking> & { tariff?: string | null } {
-  const text = html
+/** Readable text of an HTML mail (line breaks kept). */
+export function htmlToText(html: string): string {
+  return html
     .replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, "")
-    .replace(/<br\s*\/?>|<\/(p|div|tr|td|h\d)>/gi, "\n")
+    .replace(/<br\s*\/?>|<\/(p|div|tr|td|li|h\d)>/gi, "\n")
     .replace(/<[^>]+>/g, " ")
     .replace(/&nbsp;|&#160;/g, " ")
     .replace(/&amp;/g, "&")
+    .replace(/&uuml;/g, "ü")
+    .replace(/&auml;/g, "ä")
+    .replace(/&ouml;/g, "ö")
+    .replace(/&szlig;/g, "ß")
+    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
     .replace(/[ \t]+/g, " ");
+}
+
+export function parseBookingHtml(html: string): Partial<ParsedBooking> & { tariff?: string | null } {
+  const text = htmlToText(html);
   return {
     orderNumber: /Auftragsnummer\s+(\d{6,})/.exec(text)?.[1] ?? null,
     price: euro(/Gesamtbetrag:\s*([\d.]+,\d{2})\s*EUR/.exec(text)?.[1]),

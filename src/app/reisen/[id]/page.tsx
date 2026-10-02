@@ -101,9 +101,9 @@ export default function TripPage() {
     returnedToStart: t.returnedToStart,
     roundTrip: t.roundTrip,
   });
-  const screenshots = t.attachments.filter((a) => a.kind !== "claim" && a.kind !== "ticket");
+  const screenshots = t.attachments.filter((a) => !["claim", "ticket", "decision"].includes(a.kind));
   const tickets = t.attachments.filter((a) => a.kind === "ticket");
-  const forms = t.attachments.filter((a) => a.kind === "claim");
+  const forms = t.attachments.filter((a) => a.kind === "claim" || a.kind === "decision");
 
   return (
     <>
@@ -138,7 +138,11 @@ export default function TripPage() {
                 {t.originName} → {t.destName}
               </h1>
               <div className="tabular-nums text-sm">
-                {formatTime(t.plannedDeparture)} – {formatTime(t.plannedArrival)}
+                {t.plannedDeparture || t.plannedArrival ? (
+                  `${formatTime(t.plannedDeparture)} – ${formatTime(t.plannedArrival)}`
+                ) : (
+                  <span className="text-muted-foreground">Uhrzeiten unbekannt{t.source === "claim" ? " (aus Fahrgastrechte-Antrag)" : ""}</span>
+                )}
                 {t.actualArrival && (
                   <span className={cn("ml-2 font-semibold", (delay ?? 0) >= 60 ? "text-danger" : (delay ?? 0) >= 20 ? "text-warning" : "text-success")}>
                     {span.to}: tatsächlich {formatTime(t.actualArrival)} ({delay != null && delay > 0 ? `+${delay}` : delay} min)
@@ -217,6 +221,8 @@ export default function TripPage() {
                 <div className="ml-12 flex flex-wrap items-center gap-2 border-l-2 border-dashed border-border py-1 pl-3">
                   {l.isWalking ? (
                     <span className="text-xs text-muted-foreground">Fußweg</span>
+                  ) : !l.product && !l.lineName ? (
+                    <span className="text-xs text-muted-foreground">Züge unbekannt</span>
                   ) : (
                     <span className={cn("rounded px-2 py-0.5 text-xs font-semibold", legColor(l))}>{legLabel(l)}</span>
                   )}
@@ -634,9 +640,12 @@ function ClaimLine({ c, tripId, onSaved }: { c: ClaimRow; tripId: string; onSave
     });
     onSaved();
   }
+  const day = (ms: number | null) => (ms ? new Date(ms).toLocaleDateString("de-DE") : null);
   return (
-    <div className="flex flex-wrap items-center gap-2 text-sm">
-      <span className="text-muted-foreground">{new Date(c.createdAt).toLocaleDateString("de-DE")}</span>
+    <div className="space-y-1 text-sm">
+    <div className="flex flex-wrap items-center gap-2">
+      {c.caseId && <span className="font-medium">Fall {c.caseId}</span>}
+      <span className="text-muted-foreground">{day(c.submittedAt) ? `eingereicht ${day(c.submittedAt)}` : `erstellt ${day(c.createdAt)}`}</span>
       <select
         className="h-8 rounded-lg border border-input bg-background px-2 text-sm"
         value={c.status}
@@ -654,13 +663,17 @@ function ClaimLine({ c, tripId, onSaved }: { c: ClaimRow; tripId: string; onSave
           </option>
         ))}
       </select>
-      {c.amount != null && <span>erwartet {formatEuro(c.amount)}</span>}
+      {c.amount != null && c.status !== "paid" && <span>erwartet {formatEuro(c.amount)}</span>}
       {c.status === "paid" && (
         <span className="flex items-center gap-1">
           erhalten
           <Input className="h-8 w-20" inputMode="decimal" value={paid} onChange={(e) => setPaid(e.target.value)} onBlur={() => save({ paidAmount: paid ? Number(paid.replace(",", ".")) : null })} />€
+          {day(c.paidAt) && <span className="text-muted-foreground">am {day(c.paidAt)}</span>}
         </span>
       )}
+      {c.status === "rejected" && day(c.decidedAt) && <span className="text-muted-foreground">am {day(c.decidedAt)}</span>}
+    </div>
+      {c.reason && <p className={cn("text-xs", c.status === "rejected" ? "text-danger" : "text-muted-foreground")}>{c.reason}</p>}
     </div>
   );
 }

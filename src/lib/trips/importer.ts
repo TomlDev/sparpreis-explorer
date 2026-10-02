@@ -3,7 +3,8 @@ import { simpleParser } from "mailparser";
 import { extractText, getDocumentProxy } from "unpdf";
 import { db } from "@/db/client";
 import { attachments, trips, type TripRow } from "@/db/schema";
-import { parseBookingHtml, parseIcs, parseTicketText, type ParsedBooking, type ParsedJourney } from "./importDb";
+import { applyConfirmation, applyDecision, parseClaimConfirmation, parseClaimDecision, type ClaimMailResult } from "./claimMail";
+import { htmlToText, parseBookingHtml, parseIcs, parseTicketText, type ParsedBooking, type ParsedJourney } from "./importDb";
 import { createTrip, dayOf, saveAttachment, updateTrip } from "./repo";
 
 export interface ImportFile {
@@ -16,6 +17,10 @@ export interface ImportResult {
   created: TripRow[];
   updated: TripRow[];
   warnings: string[];
+  /** Passenger-rights mails that updated a claim. */
+  claims?: ClaimMailResult[];
+  /** Recognised, but nothing to import (e.g. a BahnCard order). */
+  skipped?: string;
 }
 
 async function pdfText(bytes: Buffer): Promise<string> {
@@ -62,6 +67,47 @@ export async function importDocument(file: ImportFile, source = "import"): Promi
 
   if (isEml(file)) {
     const mail = await simpleParser(file.bytes);
+    const subject = mail.subject ?? "";
+    const body = mail.html ? htmlToText(mail.html) : (mail.text ?? "");
+
+    // Passenger-rights service: receipt confirmation / decision letter.
+    if (/Fahrgastrechte/i.test(subject)) {
+      const res: ImportResult = { created: [], updated: [], warnings, claims: [] };
+      const conf = /Eingangsbest[äa]tigung/i.test(subject) ? parseClaimConfirmation(body) : null;
+      if (conf) {
+        const r = applyConfirmation(conf, (mail.date ?? new Date()).getTime());
+        if (r) res.claims!.push(r);
+      }
+      for (const a of mail.attachments.filter((a) => isPdf({ name: a.filename, type: a.contentType }))) {
+        const d = parseClaimDecision(await pdfText(a.content));
+        const r = d ? applyDecision(d, { name: a.filename ?? `Bescheid-${d.caseId}.pdf`, bytes: a.content }) : null;
+        if (r) res.claims!.push(r);
+      }
+      for (const r of res.claims!) (r.tripCreated ? res.created : res.updated).push(r.trip);
+      if (!res.claims!.length) throw new Error("Fahrgastrechte-Mail nicht erkannt.");
+      return res;
+    }
+    // BahnCard orders also arrive as "Buchungsbestätigung" — no journey in them.
+    if (/BahnCard-Bestellung|Produkt:\s*BahnCard/i.test(body) && !mail.attachments.some((a) => isIcs({ name: a.filename, type: a.contentType }))) {
+      const product = /Produkt:\s*([^\n]+)/.exec(body)?.[1]?.trim() ?? "BahnCard";
+      return { created: [], updated: [], warnings, skipped: `BahnCard-Bestellung (${product}) – keine Fahrt` };
+    }
+    // Forwarded "as attachment": the original DB mail is inside.
+    const inner = mail.attachments.filter((a) => a.contentType === "message/rfc822");
+    if (inner.length) {
+      const merged: ImportResult = { created: [], updated: [], warnings: [] };
+      for (const a of inner) {
+        try {
+          const r = await importDocument({ name: a.filename ?? "weitergeleitet.eml", type: "message/rfc822", bytes: a.content }, source);
+          merged.created.push(...r.created);
+          merged.updated.push(...r.updated);
+          merged.warnings.push(...r.warnings);
+        } catch (e) {
+          merged.warnings.push((e as Error).message);
+        }
+      }
+      if (merged.created.length || merged.updated.length) return merged;
+    }
     if (mail.html) html = parseBookingHtml(mail.html);
     for (const a of mail.attachments) {
       if (isIcs({ name: a.filename, type: a.contentType })) icsJourneys.push(...parseIcs(a.content.toString("utf8"), a.filename ?? ""));

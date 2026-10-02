@@ -636,11 +636,16 @@ export const claims = sqliteTable(
     submittedAt: integer("submitted_at"),
     paidAt: integer("paid_at"),
     paidAmount: real("paid_amount"),
+    /** DB's case number ("Fall-ID 26V00000001"). */
+    caseId: text("case_id"),
+    decidedAt: integer("decided_at"),
+    /** DB's explanation of the decision. */
+    reason: text("reason"),
     notes: text("notes"),
     createdAt: integer("created_at").notNull(),
     updatedAt: integer("updated_at").notNull(),
   },
-  (t) => ({ byTrip: index("claims_trip_idx").on(t.tripId) }),
+  (t) => ({ byTrip: index("claims_trip_idx").on(t.tripId), byCase: index("claims_case_idx").on(t.caseId) }),
 );
 
 export type TripRow = typeof trips.$inferSelect;

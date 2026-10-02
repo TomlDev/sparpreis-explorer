@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { ensureReady } from "@/lib/bootstrap";
 import { parseBookingHtml, parseIcs, parseTicketText, productOf } from "@/lib/trips/importDb";
 import { importDocument } from "@/lib/trips/importer";
+import { looksLikeBooking } from "@/lib/trips/mailSync";
 import { getTrip } from "@/lib/trips/repo";
 import { ticketSpan } from "@/lib/trips/rules";
 
@@ -169,5 +170,53 @@ describe("DB-Buchung einlesen", () => {
     const ics = await importDocument({ name: "BAHN_2026-10-05_Hinfahrt_.ics", type: "text/calendar", bytes: Buffer.from(ICS) }, "pdf");
     expect(ics.created).toHaveLength(0);
     expect(ics.updated[0]).toMatchObject({ id: t.id, orderNumber: "100000000002", price: 44.79 });
+  });
+
+  it("erkennt weitergeleitete Buchungen (GMX-Filter) und packt angehängte Mails aus", async () => {
+    expect(looksLikeBooking("noreply@deutschebahn.com", "x", null)).toBe(true);
+    expect(looksLikeBooking("ich@gmx.de", "WG: Buchungsbestätigung Deutsche Bahn (Auftrag: 1)", null)).toBe(true);
+    expect(looksLikeBooking("ich@gmx.de", "Fwd", { childNodes: [{ type: "text/calendar", dispositionParameters: { filename: "BAHN_2026-10-05_Hinfahrt_.ics" } }] })).toBe(true);
+    expect(looksLikeBooking("ich@gmx.de", "Fwd", { childNodes: [{ type: "message/rfc822" }] })).toBe(true);
+    expect(looksLikeBooking("ich@gmx.de", "WG: Ihr Fahrgastrechteantrag – 26V1 – X", null)).toBe(true);
+    expect(looksLikeBooking("ich@gmx.de", "Fwd", { childNodes: [{ dispositionParameters: { filename: "Ablehnung-26V00000002.pdf" } }] })).toBe(true);
+    expect(looksLikeBooking("newsletter@example.org", "Angebot", { type: "text/plain" })).toBe(false);
+
+    const original = [
+      "From: noreply@deutschebahn.com",
+      "Subject: Buchungsbestätigung Deutsche Bahn (Auftrag: 100000000003)",
+      "MIME-Version: 1.0",
+      'Content-Type: multipart/mixed; boundary="Y"',
+      "",
+      "--Y",
+      "Content-Type: text/html; charset=utf-8",
+      "",
+      "<p>Auftragsnummer 100000000003</p><h2>Leistungen</h2><div>Super Sparpreis, 2. Klasse</div><td>Gesamtbetrag:</td><td>19,99 EUR</td>",
+      "--Y",
+      'Content-Type: text/calendar; charset=utf-8; name="BAHN_2026-11-05_Hinfahrt_.ics"',
+      "",
+      ICS.replace("20261005", "20261105").replace(/05\.10\.2026/g, "05.11.2026"),
+      "--Y--",
+      "",
+    ].join("\r\n");
+    const forwarded = [
+      "From: ich@gmx.de",
+      "Subject: WG: Buchungsbestätigung Deutsche Bahn",
+      "MIME-Version: 1.0",
+      'Content-Type: multipart/mixed; boundary="Z"',
+      "",
+      "--Z",
+      "Content-Type: text/plain; charset=utf-8",
+      "",
+      "siehe Anhang",
+      "--Z",
+      'Content-Type: message/rfc822; name="buchung.eml"',
+      "",
+      original,
+      "--Z--",
+      "",
+    ].join("\r\n");
+    const r = await importDocument({ name: "fwd.eml", type: "message/rfc822", bytes: Buffer.from(forwarded) }, "email");
+    expect(r.created).toHaveLength(1);
+    expect(r.created[0]).toMatchObject({ orderNumber: "100000000003", price: 19.99, date: "2026-11-05" });
   });
 });

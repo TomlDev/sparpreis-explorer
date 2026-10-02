@@ -106,6 +106,14 @@ export async function listFolders(cfg = getMailConfig()): Promise<string[]> {
 }
 
 const DB_SENDER = /@(?:[\w.-]+\.)?(deutschebahn\.com|bahn\.de)>?$/i;
+const DB_SUBJECT = /Buchungsbest[äa]tigung|Deutsche Bahn|Fahrgastrechte|Auftrag:?\s*\d{6,}/i;
+const DB_PARTS = /BAHN_\d{4}-\d{2}-\d{2}|Ticket_\d{6,}|(Auszahlung|Ablehnung)-\d{2}V\d+|message\/rfc822/i;
+
+/** A DB booking — sent by DB itself, or forwarded (e.g. by a GMX filter rule),
+ *  where the sender is you but subject/attachments still give it away. */
+export function looksLikeBooking(from: string, subject: string, structure: unknown): boolean {
+  return DB_SENDER.test(from) || DB_SUBJECT.test(subject) || DB_PARTS.test(JSON.stringify(structure ?? ""));
+}
 
 declare global {
   // eslint-disable-next-line no-var
@@ -118,6 +126,7 @@ export async function syncMail(): Promise<MailStatus> {
   const cfg = getMailConfig();
   const status = getMailStatus();
   let imported = 0;
+  let claimUpdates = 0;
   const problems: string[] = [];
   try {
     const c = client(cfg);
@@ -129,14 +138,17 @@ export async function syncMail(): Promise<MailStatus> {
       const since = new Date(Date.now() - cfg.sinceDays * 86_400_000);
       const uids = ((await c.search({ since }, { uid: true })) || []).filter((u) => !seen.has(u));
       for (const uid of uids) {
-        const msg = await c.fetchOne(String(uid), { uid: true, envelope: true, source: true }, { uid: true });
+        const head = await c.fetchOne(String(uid), { uid: true, envelope: true, bodyStructure: true }, { uid: true });
         seen.add(uid);
+        if (!head) continue;
+        const from = head.envelope?.from?.[0]?.address ?? "";
+        if (!looksLikeBooking(from, head.envelope?.subject ?? "", head.bodyStructure)) continue;
+        const msg = await c.fetchOne(String(uid), { uid: true, envelope: true, source: true }, { uid: true });
         if (!msg || !msg.source) continue;
-        const from = msg.envelope?.from?.[0]?.address ?? "";
-        if (!DB_SENDER.test(from)) continue;
         try {
           const r = await importDocument({ name: `${uid}.eml`, type: "message/rfc822", bytes: msg.source }, "email");
           imported += r.created.length;
+          claimUpdates += r.claims?.length ?? 0;
         } catch (e) {
           // Not every DB mail is a booking (newsletters, invoices, …).
           const m = (e as Error).message;
@@ -146,7 +158,11 @@ export async function syncMail(): Promise<MailStatus> {
       setSetting(STATUS, {
         lastRunAt: Date.now(),
         lastOk: problems.length === 0,
-        lastMessage: [`${uids.length} neue Mails geprüft, ${imported} Fahrt(en) importiert`, ...problems.slice(0, 3)].join(" · "),
+        lastMessage: [
+          `${uids.length} neue Mails geprüft, ${imported} Fahrt(en) importiert`,
+          ...(claimUpdates ? [`${claimUpdates} Antrag/Anträge aktualisiert`] : []),
+          ...problems.slice(0, 3),
+        ].join(" · "),
         imported: status.imported + imported,
         uidValidity: validity,
         seen: [...seen].slice(-5000),

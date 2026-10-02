@@ -72,6 +72,7 @@ export function MailSyncCard() {
           className="sm:col-span-3"
           placeholder="E-Mail-Adresse / Benutzer"
           autoComplete="off"
+          name="imap-user"
           value={f.user}
           onChange={(e) => {
             const user = e.target.value;
@@ -82,7 +83,12 @@ export function MailSyncCard() {
         <Input
           className="sm:col-span-3"
           type="password"
-          autoComplete="new-password"
+          // Not "new-password": Chrome would offer to generate one, password
+          // managers would insert some other saved password.
+          autoComplete="off"
+          name="imap-password"
+          data-1p-ignore
+          data-lpignore="true"
           placeholder={v.hasPassword ? "Passwort gespeichert – leer lassen = behalten" : "Passwort (ggf. App-Passwort)"}
           value={f.password}
           onChange={(e) => setF({ ...f, password: e.target.value })}
