@@ -4,7 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import { Camera, Check, ChevronRight, ShieldCheck, TrainFront } from "lucide-react";
 import type { TripRow } from "@/db/schema";
-import { Button } from "@/components/ui";
+import { Button, Spinner, buttonClass } from "@/components/ui";
 import { formatTime } from "@/lib/time";
 import { cn } from "@/lib/utils";
 import { legLabel, logControl, uploadFiles } from "./tripUi";
@@ -27,7 +27,8 @@ function inMinutes(iso: string | null, now: number): string {
 export function TodayBanner() {
   const [items, setItems] = React.useState<TodayTrip[]>([]);
   const [now, setNow] = React.useState(() => Date.now());
-  const [msg, setMsg] = React.useState<string | null>(null);
+  const [msg, setMsg] = React.useState<{ text: string; ok: boolean } | null>(null);
+  const [busy, setBusy] = React.useState<string | null>(null);
   const fileRef = React.useRef<HTMLInputElement>(null);
   const uploadFor = React.useRef<string | null>(null);
 
@@ -42,21 +43,38 @@ export function TodayBanner() {
     return () => clearInterval(t);
   }, [load]);
 
-  const flash = (m: string) => {
-    setMsg(m);
+  const flash = (text: string, ok = true) => {
+    setMsg({ text, ok });
     setTimeout(() => setMsg(null), 4000);
   };
+  // Let an open trip page refresh (checks, photos, status).
+  const changed = () => window.dispatchEvent(new Event("trip-changed"));
 
   async function control(id: string) {
-    const r = await logControl(id);
-    flash(r.ok ? `Kontrolle gespeichert${r.withLocation ? " (mit Standort)" : " (ohne Standort)"}` : "Speichern fehlgeschlagen");
+    if (busy) return; // GPS can take a few seconds — no double entries
+    setBusy(`control-${id}`);
+    try {
+      const r = await logControl(id);
+      flash(r.ok ? `Kontrolle gespeichert${r.withLocation ? " (mit Standort)" : " (ohne Standort)"}` : "Speichern fehlgeschlagen", r.ok);
+      if (r.ok) changed();
+    } catch {
+      flash("Keine Verbindung – Kontrolle nicht gespeichert. Später auf der Fahrtseite nachtragen.", false);
+    } finally {
+      setBusy(null);
+    }
   }
   async function markDone(id: string) {
-    await fetch(`/api/trips/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status: "done" }),
-    });
+    try {
+      const res = await fetch(`/api/trips/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "done" }),
+      });
+      if (!res.ok) flash("Speichern fehlgeschlagen", false);
+      changed();
+    } catch {
+      flash("Keine Verbindung", false);
+    }
     load();
   }
 
@@ -74,8 +92,14 @@ export function TodayBanner() {
         onChange={async (e) => {
           const id = uploadFor.current;
           if (!id || !e.target.files?.length) return;
-          const err = await uploadFiles(id, e.target.files);
-          flash(err ?? `${e.target.files.length} Datei(en) gespeichert`);
+          const n = e.target.files.length;
+          try {
+            const err = await uploadFiles(id, e.target.files);
+            flash(err ?? `${n} Datei(en) gespeichert`, !err);
+            changed();
+          } catch {
+            flash("Upload fehlgeschlagen – keine Verbindung", false);
+          }
           e.target.value = "";
         }}
       />
@@ -120,8 +144,14 @@ export function TodayBanner() {
               <div className="flex shrink-0 items-center gap-1.5 pl-6 sm:pl-0">
                 {phase !== "after" ? (
                   <>
-                    <Button size="sm" variant="outline" onClick={() => control(t.id)} title="Fahrkartenkontrolle mit Zeit und Standort speichern">
-                      <ShieldCheck className="h-4 w-4" /> Kontrolliert
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={busy === `control-${t.id}`}
+                      onClick={() => control(t.id)}
+                      title="Fahrkartenkontrolle mit Zeit und Standort speichern"
+                    >
+                      {busy === `control-${t.id}` ? <Spinner /> : <ShieldCheck className="h-4 w-4" />} Kontrolliert
                     </Button>
                     <Button
                       size="sm"
@@ -137,19 +167,17 @@ export function TodayBanner() {
                   </>
                 ) : (
                   <Button size="sm" variant="outline" onClick={() => markDone(t.id)}>
-                    <Check className="h-4 w-4" /> Wie geplant
+                    <Check className="h-4 w-4" /> Pünktlich angekommen
                   </Button>
                 )}
-                <Link href={`/reisen/${t.id}`}>
-                  <Button size="sm" variant="ghost">
-                    {phase === "after" ? "Anders gelaufen" : "Details"} <ChevronRight className="h-4 w-4" />
-                  </Button>
+                <Link href={`/reisen/${t.id}`} className={buttonClass("ghost", "sm")}>
+                  {phase === "after" ? "Anders gelaufen" : "Details"} <ChevronRight className="h-4 w-4" />
                 </Link>
               </div>
             </div>
           );
         })}
-        {msg && <div className={cn("text-xs font-medium text-success")}>{msg}</div>}
+        {msg && <div className={cn("text-xs font-medium", msg.ok ? "text-success" : "text-danger")}>{msg.text}</div>}
       </div>
     </div>
   );

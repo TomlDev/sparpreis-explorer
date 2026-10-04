@@ -52,7 +52,9 @@ export interface TripFacts {
 }
 
 export interface Entitlement {
-  journey: FormJourney;
+  /** Option on DB's paper form — null when the form has no fitting option
+   *  (then: claim online / at a DB travel centre). */
+  journey: FormJourney | null;
   title: string;
   /** € the passenger can expect (null = DB computes it, e.g. unused part). */
   amount: number | null;
@@ -69,6 +71,11 @@ export function arrivalDelayMin(plannedArrival: string | null, actualArrival: st
 }
 
 const eur = (n: number) => `${n.toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
+/** pct of a fare in whole cents (no floating-point drift: 1.16 € × 25 % = 0.29 €). */
+const share = (fare: number, pct: number) => Math.round(Math.round(fare * 100) * pct) / 100;
+
+const ROUND_TRIP_REFUND =
+  "Hin- und Rückfahrt: Wird dadurch die ganze Reise sinnlos, kann auch der volle Ticketpreis erstattet werden – das entscheidet die DB.";
 
 export function assess(t: TripFacts): Entitlement | null {
   const fare = t.price != null ? (t.roundTrip ? t.price / 2 : t.price) : null;
@@ -79,46 +86,54 @@ export function assess(t: TripFacts): Entitlement | null {
     const ok = t.status === "cancelled" || (exp != null && exp >= 60);
     return {
       journey: "not_started",
-      title: "Erstattung: Reise nicht angetreten",
+      title: t.status === "cancelled" ? "Erstattung: Zug fiel aus, Reise nicht angetreten" : "Erstattung: Reise nicht angetreten",
       amount: ok ? fare : null,
       payable: ok,
       details: [
-        "Bei Zugausfall oder erwarteter Verspätung am Ziel von mind. 60 Minuten gibt es den Fahrpreis zurück.",
-        ...(fareNote ? [fareNote] : []),
+        "Bei Zugausfall oder erwarteter Verspätung am Ziel von mind. 60 Minuten gibt es den Fahrpreis zurück, wenn du die Reise nicht antrittst.",
+        ...(fareNote ? [fareNote, ROUND_TRIP_REFUND] : []),
       ],
-      caveats: ok
-        ? ["Belege für die erwartete Verspätung (Screenshot der Prognose) helfen."]
-        : ["Nur bei Zugausfall oder erwarteter Verspätung ≥ 60 min – bitte erwartete Verspätung eintragen."],
+      caveats: [
+        ...(ok
+          ? ["Belege (Screenshot der Ausfall-/Verspätungsmeldung) helfen."]
+          : ["Nur bei Zugausfall oder erwarteter Verspätung ≥ 60 min – bitte erwartete Verspätung eintragen."]),
+        "Bist du doch (später) gefahren, wähle „Verspätet angekommen“ – dann zählt die Verspätung am Ziel.",
+      ],
     };
   }
 
   if (t.status === "aborted") {
     const exp = t.expectedDelayMin ?? null;
     const ok = exp != null && exp >= 60;
+    const need = ok ? [] : ["Nur bei erwarteter Verspätung ≥ 60 min am Ziel – bitte eintragen."];
     if (t.returnedToStart) {
       return {
         journey: "aborted_return",
         title: "Erstattung: abgebrochen, zurück zum Start",
         amount: ok ? fare : null,
         payable: ok,
-        details: ["Reise sinnlos geworden und zum Ausgangsbahnhof zurück: voller Fahrpreis."],
-        caveats: ok ? [] : ["Nur bei erwarteter Verspätung ≥ 60 min am Ziel – bitte eintragen."],
+        details: ["Reise sinnlos geworden und zum Ausgangsbahnhof zurück: voller Fahrpreis.", ...(fareNote ? [fareNote, ROUND_TRIP_REFUND] : [])],
+        caveats: need,
       };
     }
+    // The paper form only knows "abgebrochen UND zurück zum Startbahnhof".
     return {
-      journey: "aborted_return",
+      journey: null,
       title: "Erstattung: Reise unterwegs abgebrochen",
       amount: null,
       payable: ok,
-      details: ["Erstattet wird der Anteil des Fahrpreises für die nicht genutzte Strecke (berechnet die DB)."],
-      caveats: ok ? [] : ["Nur bei erwarteter Verspätung ≥ 60 min am Ziel – bitte eintragen."],
+      details: ["Erstattet wird der Wert der nicht genutzten Strecke (berechnet die DB)."],
+      caveats: [
+        ...need,
+        "Das Papierformular hat dafür kein passendes Feld – bitte online beantragen (bahn.de/fahrgastrechte bzw. DB Navigator: „Fahrtabbruch unterwegs“) oder im DB Reisezentrum.",
+      ],
     };
   }
 
   const delay = arrivalDelayMin(t.plannedArrival, t.actualArrival);
   if (delay == null || delay < 60) return null;
   const pct = delay >= 120 ? 0.5 : 0.25;
-  const amount = fare != null ? Math.floor(fare * pct * 100) / 100 : null;
+  const amount = fare != null ? share(fare, pct) : null;
   const payable = amount == null || amount >= MIN_PAYOUT;
   return {
     journey: "delay",

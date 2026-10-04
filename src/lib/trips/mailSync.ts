@@ -26,6 +26,8 @@ export interface MailStatus {
   imported: number;
   uidValidity: string | null;
   seen: number[];
+  /** Failed imports per UID (retried on the next runs, given up after 3). */
+  retries?: Record<string, number>;
 }
 
 const CFG = "mail:config";
@@ -51,6 +53,9 @@ export function setMailConfig(c: Partial<MailConfig> & { password?: string }): M
   };
   // Changing account or folder starts over (UIDs are per mailbox).
   if (next.host !== cur.host || next.user !== cur.user || next.folder !== cur.folder) setSetting(STATUS, { ...getMailStatus(), uidValidity: null, seen: [] });
+  // The stored password belongs to one account: never send it to a new host/user.
+  const accountChanged = (cur.host && next.host !== cur.host) || (cur.user && next.user !== cur.user);
+  if (accountChanged && !(typeof c.password === "string" && c.password)) setSetting(PW, null);
   setSetting(CFG, next);
   if (typeof c.password === "string" && c.password) setSetting(PW, encrypt(c.password));
   return next;
@@ -65,16 +70,24 @@ export function forgetMailAccount(): void {
 function client(cfg: MailConfig): ImapFlow {
   const blob = getSetting<string>(PW);
   if (!cfg.host || !cfg.user || !blob) throw new Error("Server, Benutzer und Passwort eintragen.");
-  return new ImapFlow({
+  const c = new ImapFlow({
     host: cfg.host,
     port: cfg.port,
-    secure: cfg.port === 993, // implicit TLS; 143 upgrades via STARTTLS
+    secure: cfg.port === 993, // implicit TLS; other ports must upgrade via STARTTLS
+    doSTARTTLS: cfg.port === 993 ? undefined : true, // never fall back to plaintext
     auth: { user: cfg.user, pass: decrypt(blob) },
     logger: false,
     connectionTimeout: 20_000,
     greetingTimeout: 15_000,
     socketTimeout: 60_000,
   });
+  // imapflow reports connection problems (e.g. "Socket timeout" on an idle
+  // socket) as an "error" event; without a listener Node treats it as an
+  // uncaught exception in the server process. The awaited calls still reject.
+  c.on("error", (err: Error) => {
+    console.warn("[mailsync]", err.message);
+  });
+  return c;
 }
 
 /** imapflow errors → something a person can act on. */
@@ -105,8 +118,9 @@ export async function listFolders(cfg = getMailConfig()): Promise<string[]> {
   }
 }
 
+const MAX_MAIL_BYTES = 10 * 1024 * 1024;
 const DB_SENDER = /@(?:[\w.-]+\.)?(deutschebahn\.com|bahn\.de)>?$/i;
-const DB_SUBJECT = /Buchungsbest[äa]tigung|Deutsche Bahn|Fahrgastrechte|Auftrag:?\s*\d{6,}/i;
+const DB_SUBJECT = /Buchungsbest[äa]tigung|Reservierungsbest[äa]tigung|Deutsche Bahn|Fahrgastrechte|Fahrplan(ä|ae)nderung|Auftrag:?\s*\d{6,}/i;
 const DB_PARTS = /BAHN_\d{4}-\d{2}-\d{2}|Ticket_\d{6,}|(Auszahlung|Ablehnung)-\d{2}V\d+|message\/rfc822/i;
 
 /** A DB booking — sent by DB itself, or forwarded (e.g. by a GMX filter rule),
@@ -134,39 +148,75 @@ export async function syncMail(): Promise<MailStatus> {
     try {
       const box = await c.mailboxOpen(cfg.folder, { readOnly: true });
       const validity = String(box.uidValidity);
-      const seen = new Set(status.uidValidity === validity ? status.seen : []);
+      const sameBox = status.uidValidity === validity;
+      const seen = new Set(sameBox ? status.seen : []);
+      const retries: Record<string, number> = sameBox ? { ...(status.retries ?? {}) } : {};
       const since = new Date(Date.now() - cfg.sinceDays * 86_400_000);
       const uids = ((await c.search({ since }, { uid: true })) || []).filter((u) => !seen.has(u));
-      for (const uid of uids) {
-        const head = await c.fetchOne(String(uid), { uid: true, envelope: true, bodyStructure: true }, { uid: true });
+      // Progress is stored after every message, so a restart mid-run never redoes or loses work.
+      const save = (final = false) =>
+        setSetting(STATUS, {
+          lastRunAt: Date.now(),
+          lastOk: problems.length === 0,
+          lastMessage: [
+            `${uids.length} neue Mails geprüft${final ? "" : " (läuft)"}, ${imported} Fahrt(en) importiert`,
+            ...(claimUpdates ? [`${claimUpdates} Antrag/Anträge aktualisiert`] : []),
+            ...problems.slice(0, 3),
+          ].join(" · "),
+          imported: status.imported + imported,
+          uidValidity: validity,
+          seen: [...seen].slice(-5000),
+          retries,
+        } satisfies MailStatus);
+      const done = (uid: number) => {
         seen.add(uid);
-        if (!head) continue;
-        const from = head.envelope?.from?.[0]?.address ?? "";
-        if (!looksLikeBooking(from, head.envelope?.subject ?? "", head.bodyStructure)) continue;
-        const msg = await c.fetchOne(String(uid), { uid: true, envelope: true, source: true }, { uid: true });
-        if (!msg || !msg.source) continue;
-        try {
-          const r = await importDocument({ name: `${uid}.eml`, type: "message/rfc822", bytes: msg.source }, "email");
-          imported += r.created.length;
-          claimUpdates += r.claims?.length ?? 0;
-        } catch (e) {
-          // Not every DB mail is a booking (newsletters, invoices, …).
-          const m = (e as Error).message;
-          if (!/Keine Verbindung/.test(m)) problems.push(`${msg.envelope?.subject ?? uid}: ${m}`);
+        delete retries[String(uid)];
+      };
+      for (const uid of uids) {
+        const head = await c.fetchOne(String(uid), { uid: true, envelope: true, bodyStructure: true, size: true }, { uid: true });
+        if (!head) {
+          done(uid);
+          continue;
         }
+        const subject = head.envelope?.subject ?? "";
+        const from = head.envelope?.from?.[0]?.address ?? "";
+        // Forwarded mails (e.g. a GMX filter) are always looked at — their
+        // original sender is only visible inside.
+        const forwarded = /^(?:fwd?|wg|wtr)\s*:/i.test(subject);
+        if (!forwarded && !looksLikeBooking(from, subject, head.bodyStructure)) {
+          done(uid);
+          continue;
+        }
+        if ((head.size ?? 0) > MAX_MAIL_BYTES) {
+          problems.push(`${subject || uid}: zu groß (${Math.round((head.size ?? 0) / 1e6)} MB) – übersprungen`);
+          done(uid);
+          save();
+          continue;
+        }
+        try {
+          const msg = await c.fetchOne(String(uid), { uid: true, source: true }, { uid: true });
+          if (msg && msg.source) {
+            const r = await importDocument({ name: `${uid}.eml`, type: "message/rfc822", bytes: msg.source }, "email");
+            imported += r.created.length;
+            claimUpdates += r.claims?.length ?? 0;
+          }
+          done(uid);
+        } catch (e) {
+          const m = (e as Error).message;
+          if (/Keine Verbindung|nicht erkannt/.test(m)) {
+            done(uid); // a DB mail without anything to import (newsletter, invoice, …)
+          } else {
+            const n = (retries[String(uid)] ?? 0) + 1;
+            retries[String(uid)] = n;
+            if (n >= 3) {
+              done(uid);
+              problems.push(`${subject || uid}: ${m} (aufgegeben)`);
+            } else problems.push(`${subject || uid}: ${m} (wird erneut versucht)`);
+          }
+        }
+        save();
       }
-      setSetting(STATUS, {
-        lastRunAt: Date.now(),
-        lastOk: problems.length === 0,
-        lastMessage: [
-          `${uids.length} neue Mails geprüft, ${imported} Fahrt(en) importiert`,
-          ...(claimUpdates ? [`${claimUpdates} Antrag/Anträge aktualisiert`] : []),
-          ...problems.slice(0, 3),
-        ].join(" · "),
-        imported: status.imported + imported,
-        uidValidity: validity,
-        seen: [...seen].slice(-5000),
-      } satisfies MailStatus);
+      save(true);
     } finally {
       await c.logout().catch(() => {});
     }

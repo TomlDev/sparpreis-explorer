@@ -36,8 +36,14 @@ export async function POST(req: Request, { params }: Ctx) {
     returnedToStart: trip.returnedToStart,
     roundTrip: trip.roundTrip,
   });
-  const journey = JOURNEYS.includes(b.journey as FormJourney) ? (b.journey as FormJourney) : ent?.journey;
-  if (!journey) return NextResponse.json({ error: "Für diese Fahrt besteht laut den DB-Regeln kein Anspruch." }, { status: 400 });
+  if (!ent) return NextResponse.json({ error: "Für diese Fahrt besteht laut den DB-Regeln kein Anspruch." }, { status: 400 });
+  if (!ent.payable) return NextResponse.json({ error: ent.caveats[0] ?? "Laut den DB-Regeln wird hier nichts ausgezahlt." }, { status: 400 });
+  const journey = JOURNEYS.includes(b.journey as FormJourney) ? (b.journey as FormJourney) : ent.journey;
+  if (!journey)
+    return NextResponse.json(
+      { error: "Für diesen Fall hat das Papierformular kein passendes Feld – bitte online (bahn.de / DB Navigator) oder im Reisezentrum beantragen." },
+      { status: 400 },
+    );
 
   const extra = (b.extra ?? {}) as Record<string, unknown>;
   const pdf = await fillClaimForm({
@@ -53,7 +59,7 @@ export async function POST(req: Request, { params }: Ctx) {
   const claim = saveClaim(trip.id, {
     type: journey,
     delayMin: journey === "delay" ? arrivalDelayMin(span.arrival, trip.actualArrival) : expectedDelayMin,
-    amount: ent?.amount ?? null,
+    amount: ent.amount ?? null,
     payout: p.payout,
     notes: `Formular erzeugt (${attachment.id}). Einsenden an: ${FORM_ADDRESS}`,
   });
@@ -75,6 +81,7 @@ export async function PATCH(req: Request, { params }: Ctx) {
     submittedAt: num(b.submittedAt),
     paidAt: num(b.paidAt),
     paidAmount: num(b.paidAmount),
+    decidedAt: num(b.decidedAt),
     notes: typeof b.notes === "string" ? b.notes.slice(0, 2000) : undefined,
   });
   return NextResponse.json({ claim });

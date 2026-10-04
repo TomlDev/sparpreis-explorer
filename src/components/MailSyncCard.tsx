@@ -42,16 +42,22 @@ export function MailSyncCard() {
   async function call(action: string, extra: Record<string, unknown> = {}) {
     setBusy(action);
     setErr(null);
-    const res = await fetch("/api/mailsync", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action, ...extra }),
-    });
-    const d = await res.json().catch(() => ({}));
-    setBusy(null);
-    if (!res.ok) setErr(d.error ?? "Fehler");
-    if (d.config) apply(d);
-    return res.ok ? d : null;
+    try {
+      const res = await fetch("/api/mailsync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, ...extra }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) setErr(d.error ?? "Fehler");
+      if (d.config) apply(d);
+      return res.ok ? d : null;
+    } catch {
+      setErr("Keine Verbindung zum Server");
+      return null;
+    } finally {
+      setBusy(null);
+    }
   }
   const save = (extra: Record<string, unknown> = {}) =>
     call("save", { ...f, port: Number(f.port) || 993, password: f.password || undefined, ...extra });

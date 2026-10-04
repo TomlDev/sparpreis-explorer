@@ -1,15 +1,12 @@
 import * as React from "react";
 import { cn } from "@/lib/utils";
 
-export function Button({
-  className,
-  variant = "default",
-  size = "md",
-  ...props
-}: React.ButtonHTMLAttributes<HTMLButtonElement> & {
-  variant?: "default" | "outline" | "ghost" | "subtle" | "danger";
-  size?: "sm" | "md" | "lg" | "icon";
-}) {
+type ButtonVariant = "default" | "outline" | "ghost" | "subtle" | "danger";
+type ButtonSize = "sm" | "md" | "lg" | "icon";
+
+/** Button look for other elements (e.g. a Link that should look like a button —
+ *  never nest a <button> inside an <a>). */
+export function buttonClass(variant: ButtonVariant = "default", size: ButtonSize = "md", className?: string): string {
   const variants = {
     default: "bg-primary text-primary-foreground hover:opacity-90",
     outline: "border border-border bg-transparent hover:bg-muted",
@@ -23,17 +20,24 @@ export function Button({
     lg: "h-12 px-6 text-base",
     icon: "h-10 w-10",
   };
-  return (
-    <button
-      className={cn(
-        "inline-flex items-center justify-center gap-2 rounded-xl font-medium transition disabled:opacity-50 disabled:pointer-events-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-        variants[variant],
-        sizes[size],
-        className,
-      )}
-      {...props}
-    />
+  return cn(
+    "inline-flex items-center justify-center gap-2 rounded-xl font-medium transition disabled:opacity-50 disabled:pointer-events-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+    variants[variant],
+    sizes[size],
+    className,
   );
+}
+
+export function Button({
+  className,
+  variant = "default",
+  size = "md",
+  ...props
+}: React.ButtonHTMLAttributes<HTMLButtonElement> & {
+  variant?: ButtonVariant;
+  size?: ButtonSize;
+}) {
+  return <button className={buttonClass(variant, size, className)} {...props} />;
 }
 
 export const Card = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(

@@ -22,6 +22,7 @@ export async function POST(req: Request) {
   const b = (await req.json().catch(() => ({}))) as Record<string, unknown>;
   const legs = (Array.isArray(b.legs) ? b.legs : []) as Record<string, unknown>[];
   const str = (v: unknown) => (typeof v === "string" && v ? v.slice(0, 200) : null);
+  const when = (v: unknown) => (typeof v === "string" && !Number.isNaN(Date.parse(v)) ? new Date(v).toISOString() : null);
   const clean: TripLeg[] = legs.slice(0, 40).map((l) => ({
     product: str(l.product) ?? undefined,
     lineName: str(l.lineName) ?? undefined,
@@ -30,8 +31,8 @@ export async function POST(req: Request) {
     fromName: str(l.fromName) ?? "?",
     toId: str(l.toId),
     toName: str(l.toName) ?? "?",
-    plannedDeparture: str(l.plannedDeparture),
-    plannedArrival: str(l.plannedArrival),
+    plannedDeparture: when(l.plannedDeparture),
+    plannedArrival: when(l.plannedArrival),
     isWalking: l.isWalking === true,
   }));
   try {

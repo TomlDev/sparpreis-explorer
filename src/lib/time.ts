@@ -95,3 +95,16 @@ export function formatAgo(epochMs: number | null | undefined): string {
   const d = Math.round(h / 24);
   return `vor ${d} d`;
 }
+
+/** Berlin wall time ("2026-10-25", "01:30") → ISO instant; null for invalid input.
+ *  DST-safe (a repeated hour resolves to its first occurrence). */
+export function berlinToIso(date: string, time: string): string | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(time)) return null;
+  const d = fromZonedTime(`${date}T${time}:00`, TIMEZONE);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+/** Calendar day (yyyy-MM-dd) of an instant in Europe/Berlin. */
+export function berlinDay(at: string | number | Date): string {
+  return formatInTimeZone(new Date(at), TIMEZONE, "yyyy-MM-dd");
+}

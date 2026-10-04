@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { CalendarDays, FlaskConical, LogOut, Search, Settings, TrainFront } from "lucide-react";
-import { Button } from "@/components/ui";
+import { Button, buttonClass } from "@/components/ui";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { TodayBanner } from "@/components/trips/TodayBanner";
 
@@ -26,25 +26,17 @@ export function AppHeader({ center }: { center?: ReactNode }) {
         </Link>
         {center ? <div className="min-w-0 flex-1">{center}</div> : <div className="flex-1" />}
         <nav className="flex shrink-0 items-center gap-1">
-          <Link href="/reisen">
-            <Button variant="ghost" size="icon" aria-label="Reisen" title="Meine Reisen">
-              <CalendarDays className="h-5 w-5" />
-            </Button>
+          <Link href="/reisen" className={buttonClass("ghost", "icon")} aria-label="Reisen" title="Meine Reisen">
+            <CalendarDays className="h-5 w-5" />
           </Link>
-          <Link href="/">
-            <Button variant="ghost" size="icon" aria-label="Suche" title="Ticketsuche">
-              <Search className="h-5 w-5" />
-            </Button>
+          <Link href="/" className={buttonClass("ghost", "icon")} aria-label="Suche" title="Ticketsuche">
+            <Search className="h-5 w-5" />
           </Link>
-          <Link href="/lab">
-            <Button variant="ghost" size="icon" aria-label="Lab">
-              <FlaskConical className="h-5 w-5" />
-            </Button>
+          <Link href="/lab" className={buttonClass("ghost", "icon")} aria-label="Lab" title="Lab">
+            <FlaskConical className="h-5 w-5" />
           </Link>
-          <Link href="/settings">
-            <Button variant="ghost" size="icon" aria-label="Einstellungen">
-              <Settings className="h-5 w-5" />
-            </Button>
+          <Link href="/settings" className={buttonClass("ghost", "icon")} aria-label="Einstellungen" title="Einstellungen">
+            <Settings className="h-5 w-5" />
           </Link>
           <ThemeToggle />
           <Button variant="ghost" size="icon" aria-label="Abmelden" onClick={logout}>

@@ -524,6 +524,8 @@ export interface TripLeg {
   isWalking?: boolean;
   depPlatform?: string | null;
   arrPlatform?: string | null;
+  /** Seat reservation on this train ("Wg. 2, Pl. 31 33"). */
+  reservation?: string | null;
 }
 
 /** What the ticket itself says (from the DB ticket PDF / booking mail). */
@@ -539,6 +541,11 @@ export interface TicketInfo {
   validity?: string | null;
   bookedAt?: string | null;
   traveller?: string | null;
+  /** Only a seat reservation, not a ticket (price is the reservation fee). */
+  reservationOnly?: boolean;
+  reservationPrice?: number | null;
+  /** DB announced a schedule change and lifted the Zugbindung. */
+  scheduleChange?: { notifiedAt: string; zugbindungLifted: boolean; text: string } | null;
 }
 
 export const trips = sqliteTable(

@@ -92,12 +92,12 @@ describe("Reisen", () => {
   });
 
   it("findet die Fahrten von heute und speichert, was passiert ist", () => {
-    const today = new Date().toLocaleDateString("sv-SE", { timeZone: "Europe/Berlin" });
-    const later = new Date(Date.now() + 3600_000).toISOString();
+    // A trip under way right now (works at any time of day, also around midnight).
+    const dep = new Date(Date.now() - 5 * 60_000).toISOString();
     const t = createTrip({
-      legs: [{ fromName: "A", toName: "B", plannedDeparture: later, plannedArrival: new Date(Date.now() + 7200_000).toISOString() }],
+      legs: [{ fromName: "A", toName: "B", plannedDeparture: dep, plannedArrival: new Date(Date.now() + 3600_000).toISOString() }],
     });
-    expect(t.date).toBe(today);
+    expect(t.date).toBe(new Date(dep).toLocaleDateString("sv-SE", { timeZone: "Europe/Berlin" }));
     expect(currentTrips().map((x) => x.id)).toContain(t.id);
     const u = updateTrip(t.id, { status: "aborted", abortedAt: "A", expectedDelayMin: 80, returnedToStart: true })!;
     expect(u).toMatchObject({ status: "aborted", expectedDelayMin: 80, returnedToStart: true });

@@ -9,7 +9,7 @@ import { Badge, Button, Card, Input, Spinner } from "@/components/ui";
 import { EventDialog } from "@/components/trips/EventDialog";
 import { STATUS, legColor, legLabel, mapsLink, uploadFiles } from "@/components/trips/tripUi";
 import type { AttachmentRow, ClaimRow, TripEventRow, TripRow } from "@/db/schema";
-import { formatTime } from "@/lib/time";
+import { berlinDay, berlinToIso, formatTime } from "@/lib/time";
 import { arrivalDelayMin, assess, liveHints, ticketSpan } from "@/lib/trips/rules";
 import { cn, formatEuro } from "@/lib/utils";
 
@@ -33,45 +33,58 @@ const timeOf = (ms: number) => new Date(ms).toLocaleTimeString("de-DE", { timeZo
 const dayLabel = (d: string) =>
   new Date(`${d}T12:00:00Z`).toLocaleDateString("de-DE", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
 
-/** Berlin wall time (yyyy-MM-dd + HH:mm) → ISO. */
-function berlinIso(date: string, time: string): string | null {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(time)) return null;
-  const guess = new Date(`${date}T${time}:00Z`);
-  const local = new Date(guess.toLocaleString("en-US", { timeZone: "Europe/Berlin" }));
-  const utc = new Date(guess.toLocaleString("en-US", { timeZone: "UTC" }));
-  return new Date(guess.getTime() - (local.getTime() - utc.getTime())).toISOString();
-}
-const berlinDate = (iso: string) => new Date(iso).toLocaleDateString("sv-SE", { timeZone: "Europe/Berlin" });
+const berlinIso = berlinToIso;
+const berlinDate = (iso: string) => berlinDay(iso);
 
 export default function TripPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const [t, setT] = React.useState<Detail | null>(null);
-  const [msg, setMsg] = React.useState<string | null>(null);
+  const [msg, setMsg] = React.useState<{ text: string; ok: boolean } | null>(null);
   const [busy, setBusy] = React.useState<string | null>(null);
   const fileRef = React.useRef<HTMLInputElement>(null);
   const [dialog, setDialog] = React.useState<{ event: TripEventRow | null; type: "control" | "note" } | null>(null);
 
+  const [loadError, setLoadError] = React.useState<string | null>(null);
   const load = React.useCallback(async () => {
-    const res = await fetch(`/api/trips/${id}`);
-    if (res.ok) setT((await res.json()).trip);
+    try {
+      const res = await fetch(`/api/trips/${id}`);
+      if (res.ok) {
+        setT((await res.json()).trip);
+        setLoadError(null);
+      } else setLoadError(res.status === 404 ? "Diese Fahrt gibt es nicht (mehr)." : `Laden fehlgeschlagen (${res.status}).`);
+    } catch {
+      setLoadError("Keine Verbindung – bitte später erneut versuchen.");
+    }
   }, [id]);
   React.useEffect(() => {
-    load().catch(() => {});
+    load();
+    // The "today" banner (check, photo, "Wie geplant") changes this trip too.
+    const onChange = () => load();
+    window.addEventListener("trip-changed", onChange);
+    return () => window.removeEventListener("trip-changed", onChange);
   }, [load]);
 
-  const flash = (m: string) => {
-    setMsg(m);
+  // Lives here, not in WhatHappened: a save changes its key and remounts it.
+  const [whSaved, setWhSaved] = React.useState(false);
+  const flash = (m: string, ok = true) => {
+    setMsg({ text: m, ok });
     setTimeout(() => setMsg(null), 4000);
   };
-  async function patch(body: Record<string, unknown>) {
-    const res = await fetch(`/api/trips/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) flash((await res.json().catch(() => ({}))).error ?? "Speichern fehlgeschlagen");
-    await load();
+  async function patch(body: Record<string, unknown>): Promise<boolean> {
+    try {
+      const res = await fetch(`/api/trips/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) flash((await res.json().catch(() => ({}))).error ?? "Speichern fehlgeschlagen", false);
+      await load();
+      return res.ok;
+    } catch {
+      flash("Speichern fehlgeschlagen – keine Verbindung", false);
+      return false;
+    }
   }
 
   if (!t)
@@ -79,7 +92,16 @@ export default function TripPage() {
       <>
         <AppHeader />
         <main className="container py-10 text-center">
-          <Spinner />
+          {loadError ? (
+            <div className="space-y-3">
+              <p>{loadError}</p>
+              <Link href="/reisen" className="text-primary underline">
+                Zu meinen Reisen
+              </Link>
+            </div>
+          ) : (
+            <Spinner />
+          )}
         </main>
       </>
     );
@@ -117,11 +139,16 @@ export default function TripPage() {
         onChange={async (e) => {
           if (!e.target.files?.length) return;
           setBusy("upload");
-          const err = await uploadFiles(t.id, e.target.files);
-          setBusy(null);
-          flash(err ?? "Gespeichert");
-          e.target.value = "";
-          load();
+          try {
+            const err = await uploadFiles(t.id, e.target.files);
+            flash(err ?? "Gespeichert", !err);
+          } catch {
+            flash("Upload fehlgeschlagen – keine Verbindung", false);
+          } finally {
+            setBusy(null);
+            e.target.value = "";
+            load();
+          }
         }}
       />
       <main className="container max-w-3xl space-y-4 py-5">
@@ -145,7 +172,8 @@ export default function TripPage() {
                 )}
                 {t.actualArrival && (
                   <span className={cn("ml-2 font-semibold", (delay ?? 0) >= 60 ? "text-danger" : (delay ?? 0) >= 20 ? "text-warning" : "text-success")}>
-                    {span.to}: tatsächlich {formatTime(t.actualArrival)} ({delay != null && delay > 0 ? `+${delay}` : delay} min)
+                    {span.to}: tatsächlich {formatTime(t.actualArrival)}
+                    {delay != null && ` (${delay > 0 ? `+${delay}` : delay} min)`}
                   </span>
                 )}
               </div>
@@ -154,6 +182,23 @@ export default function TripPage() {
               {STATUS[t.status]?.label ?? t.status}
             </span>
           </div>
+          {t.ticket?.scheduleChange && (
+            <div className="mt-3 rounded-xl border border-warning/40 bg-warning/10 p-3 text-sm">
+              <b>Fahrplanänderung</b> (Mail der DB vom {new Date(t.ticket.scheduleChange.notifiedAt).toLocaleDateString("de-DE")})
+              {t.ticket.scheduleChange.zugbindungLifted ? (
+                <div>Die DB hat die Zugbindung aufgehoben – du darfst jeden Zug zu deinem Ziel nehmen, auch früher oder auf anderer Route.</div>
+              ) : (
+                <div>Bitte die Verbindung prüfen.</div>
+              )}
+            </div>
+          )}
+          {t.ticket?.reservationOnly && (
+            <p className="mt-2 text-xs text-muted-foreground">
+              Nur Sitzplatzreservierung
+              {t.ticket.reservationPrice != null ? ` (${formatEuro(t.ticket.reservationPrice)})` : ""} – der Fahrschein war separat
+              (z. B. Deutschland-Ticket). Für Fahrgastrechte zählt der Preis des Fahrscheins.
+            </p>
+          )}
           <TicketFields t={t} onSave={patch} />
           {(t.ticket || tickets.length > 0) && (
             <div className="mt-3 space-y-1 border-t border-border pt-3 text-sm">
@@ -169,9 +214,14 @@ export default function TripPage() {
                   Ticket: {t.ticket.from} → {t.ticket.to}
                 </div>
               )}
-              {!!t.ticket?.zugbindung?.length && (
-                <div className="text-muted-foreground">Zugbindung: {t.ticket.zugbindung.map((z) => z.split(",")[0]).join(", ")}</div>
-              )}
+              {(() => {
+                // Round-trip tickets list both directions — show this day's trains.
+                const day = t.date.split("-").reverse().join(".");
+                const all = t.ticket?.zugbindung ?? [];
+                const mine = all.filter((z) => z.includes(day));
+                const list = (mine.length ? mine : all).map((z) => z.split(",")[0]);
+                return list.length ? <div className="text-muted-foreground">Zugbindung: {list.join(", ")}</div> : null;
+              })()}
               {t.ticket?.validity && <div className="text-xs text-muted-foreground">Gültig {t.ticket.validity}</div>}
               {tickets.map((a) => (
                 <a key={a.id} href={`/api/attachments/${a.id}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-primary underline">
@@ -194,7 +244,7 @@ export default function TripPage() {
             <StickyNote className="h-4 w-4" /> Notiz
           </Button>
         </div>
-        {msg && <p className="text-sm font-medium text-success">{msg}</p>}
+        {msg && <p className={cn("text-sm font-medium", msg.ok ? "text-success" : "text-danger")}>{msg.text}</p>}
         <EventDialog
           open={!!dialog}
           onClose={() => setDialog(null)}
@@ -230,6 +280,7 @@ export default function TripPage() {
                     {l.depPlatform ? `Gl. ${l.depPlatform} ` : ""}→ {l.toName} an {formatTime(l.plannedArrival)}
                     {l.arrPlatform ? ` · Gl. ${l.arrPlatform}` : ""}
                   </span>
+                  {l.reservation && <span className="text-xs font-medium text-primary">Platz: {l.reservation}</span>}
                 </div>
                 {(eventsByLeg.get(i) ?? []).map((e) => (
                   <EventLine key={e.id} e={e} tripId={t.id} onDeleted={load} onEdit={() => setDialog({ event: e, type: e.type === "note" ? "note" : "control" })} />
@@ -246,7 +297,19 @@ export default function TripPage() {
           </div>
         </Card>
 
-        <WhatHappened t={t} onSave={patch} />
+        <WhatHappened
+          key={`${t.status}|${t.actualArrival}|${t.abortedAt}|${t.expectedDelayMin}|${t.returnedToStart}|${t.notes}`}
+          t={t}
+          saved={whSaved}
+          onSave={async (b) => {
+            const ok = await patch(b);
+            if (ok) {
+              setWhSaved(true);
+              setTimeout(() => setWhSaved(false), 2000);
+            }
+            return ok;
+          }}
+        />
 
         {/* Compensation */}
         <Card className="p-4">
@@ -257,8 +320,14 @@ export default function TripPage() {
             <p className="text-sm text-muted-foreground">
               {t.status === "planned"
                 ? "Nach der Fahrt oben eintragen, was passiert ist – dann rechnet die App aus, was dir zusteht."
-                : "Laut den DB-Regeln besteht kein Anspruch (Entschädigung erst ab 60 min Verspätung am Ziel)."}
-              {liveHints(delay).length > 0 && <span className="mt-1 block">{liveHints(delay)[0]}</span>}
+                : (t.status === "delayed" || t.status === "done") && !t.actualArrival
+                  ? "Trag oben die tatsächliche Ankunft ein – dann rechnet die App aus, ob dir etwas zusteht."
+                  : !span.arrival && t.actualArrival
+                    ? "Die geplante Ankunft ist unbekannt – ohne sie lässt sich die Verspätung nicht berechnen."
+                    : "Laut den DB-Regeln besteht kein Anspruch (Entschädigung erst ab 60 min Verspätung am Ziel)."}
+              {t.status === "planned" && liveHints(t.expectedDelayMin).length > 0 && (
+                <span className="mt-1 block">{liveHints(t.expectedDelayMin)[0]}</span>
+              )}
             </p>
           )}
           {t.claims.length > 0 && (
@@ -309,9 +378,10 @@ export default function TripPage() {
                         await fetch(`/api/attachments/${a.id}`, { method: "DELETE" });
                         load();
                       }}
-                      aria-label="Löschen"
+                      aria-label="Datei löschen"
+                      className="-m-1 p-1.5"
                     >
-                      <Trash2 className="h-3 w-3" />
+                      <Trash2 className="h-4 w-4" />
                     </button>
                   </div>
                 </div>
@@ -378,15 +448,16 @@ function EventLine({ e, tripId, onDeleted, onEdit }: { e: TripEventRow; tripId: 
   );
 }
 
-function TicketFields({ t, onSave }: { t: Detail; onSave: (b: Record<string, unknown>) => Promise<void> }) {
+function TicketFields({ t, onSave }: { t: Detail; onSave: (b: Record<string, unknown>) => Promise<boolean> }) {
   const [open, setOpen] = React.useState(false);
-  const [f, setF] = React.useState({
+  const fromTrip = () => ({
     price: t.price != null ? String(t.price).replace(".", ",") : "",
     orderNumber: t.orderNumber ?? "",
     ticketType: t.ticketType ?? "",
     direction: t.direction ?? "outbound",
     roundTrip: t.roundTrip,
   });
+  const [f, setF] = React.useState(fromTrip);
   if (!open)
     return (
       <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
@@ -394,7 +465,13 @@ function TicketFields({ t, onSave }: { t: Detail; onSave: (b: Record<string, unk
         <span>{t.orderNumber ? `Auftrag ${t.orderNumber}` : "keine Auftragsnummer"}</span>
         {t.ticketType && <span>{t.ticketType}</span>}
         {t.roundTrip && <Badge variant="outline">Hin- und Rückfahrt</Badge>}
-        <button className="text-primary underline" onClick={() => setOpen(true)}>
+        <button
+          className="text-primary underline"
+          onClick={() => {
+            setF(fromTrip()); // start from what is stored, not from an abandoned edit
+            setOpen(true);
+          }}
+        >
           Ticketdaten bearbeiten
         </button>
       </div>
@@ -421,14 +498,14 @@ function TicketFields({ t, onSave }: { t: Detail; onSave: (b: Record<string, unk
           size="sm"
           onClick={async () => {
             const price = f.price.trim() ? Number(f.price.replace(",", ".")) : null;
-            await onSave({
+            const ok = await onSave({
               price: price != null && Number.isFinite(price) ? price : null,
               orderNumber: f.orderNumber.trim() || null,
               ticketType: f.ticketType.trim() || null,
               direction: f.direction,
               roundTrip: f.roundTrip,
             });
-            setOpen(false);
+            if (ok) setOpen(false);
           }}
         >
           Speichern
@@ -442,7 +519,7 @@ function TicketFields({ t, onSave }: { t: Detail; onSave: (b: Record<string, unk
 }
 
 /** Status + what actually happened (actual arrival, abort station, expected delay, free text). */
-function WhatHappened({ t, onSave }: { t: Detail; onSave: (b: Record<string, unknown>) => Promise<void> }) {
+function WhatHappened({ t, saved, onSave }: { t: Detail; saved: boolean; onSave: (b: Record<string, unknown>) => Promise<boolean> }) {
   const span = ticketSpan(t);
   const stations = Array.from(new Set(t.legs.flatMap((l) => [l.fromName, l.toName])));
   const [status, setStatus] = React.useState(t.status);
@@ -452,17 +529,23 @@ function WhatHappened({ t, onSave }: { t: Detail; onSave: (b: Record<string, unk
   const [returned, setReturned] = React.useState(t.returnedToStart);
   const [expected, setExpected] = React.useState(t.expectedDelayMin != null ? String(t.expectedDelayMin) : "");
   const [notes, setNotes] = React.useState(t.notes ?? "");
-  const [saved, setSaved] = React.useState(false);
+  const [busy, setBusy] = React.useState(false);
 
   const options: [string, string][] = [
     ["done", "Wie geplant / pünktlich"],
     ["delayed", "Verspätet angekommen"],
     ["aborted", "Unterwegs abgebrochen"],
     ["not_started", "Nicht angetreten"],
-    ["cancelled", "Zug fiel aus"],
+    ["cancelled", "Zugausfall – nicht gefahren"],
   ];
   const needsArrival = status === "delayed" || status === "done";
   const needsExpected = status === "aborted" || status === "not_started";
+  const hint =
+    status === "cancelled"
+      ? "Nur wählen, wenn du die Reise deshalb nicht angetreten hast. Bist du später doch gefahren: „Verspätet angekommen“."
+      : status === "delayed" && !arrTime
+        ? "Trag die tatsächliche Ankunft ein – erst dann lässt sich die Entschädigung berechnen."
+        : null;
 
   return (
     <Card className="p-4">
@@ -472,6 +555,7 @@ function WhatHappened({ t, onSave }: { t: Detail; onSave: (b: Record<string, unk
           <button
             key={k}
             onClick={() => setStatus(k)}
+            aria-pressed={status === k}
             className={cn(
               "rounded-full border px-3 py-1.5 text-sm",
               status === k ? "border-primary bg-primary text-primary-foreground" : "border-border hover:bg-muted",
@@ -481,7 +565,8 @@ function WhatHappened({ t, onSave }: { t: Detail; onSave: (b: Record<string, unk
           </button>
         ))}
       </div>
-      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+      {hint && <p className="mt-2 text-xs text-muted-foreground">{hint}</p>}
+      <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 [&>*]:min-w-0">
         {needsArrival && (
           <label className="flex flex-col gap-1 text-sm">
             <span className="text-xs text-muted-foreground">
@@ -494,17 +579,23 @@ function WhatHappened({ t, onSave }: { t: Detail; onSave: (b: Record<string, unk
           </label>
         )}
         {status === "aborted" && (
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-xs text-muted-foreground">Abgebrochen in</span>
-            <select className="h-10 rounded-xl border border-input bg-background px-3" value={abortedAt} onChange={(e) => setAbortedAt(e.target.value)}>
-              {stations.map((s) => (
-                <option key={s}>{s}</option>
-              ))}
-            </select>
-            <span className="flex items-center gap-2">
+          <div className="flex flex-col gap-1 text-sm">
+            <label className="flex flex-col gap-1">
+              <span className="text-xs text-muted-foreground">Abgebrochen in</span>
+              <select
+                className="h-10 w-full min-w-0 max-w-full truncate rounded-xl border border-input bg-background px-3"
+                value={abortedAt}
+                onChange={(e) => setAbortedAt(e.target.value)}
+              >
+                {stations.map((s) => (
+                  <option key={s}>{s}</option>
+                ))}
+              </select>
+            </label>
+            <label className="flex items-center gap-2 py-1">
               <input type="checkbox" checked={returned} onChange={(e) => setReturned(e.target.checked)} /> zurück zum Startbahnhof gefahren
-            </span>
-          </label>
+            </label>
+          </div>
         )}
         {needsExpected && (
           <label className="flex flex-col gap-1 text-sm">
@@ -524,9 +615,14 @@ function WhatHappened({ t, onSave }: { t: Detail; onSave: (b: Record<string, unk
       </div>
       <Button
         className="mt-3"
+        disabled={busy}
         onClick={async () => {
-          const iso = needsArrival && arrTime ? berlinIso(arrDate, arrTime) : null;
-          await onSave({
+          let iso = needsArrival && arrTime ? berlinIso(arrDate, arrTime) : null;
+          // 01:15 entered for a 23:30 arrival without changing the date → next day.
+          if (iso && span.arrival && new Date(iso).getTime() < new Date(span.arrival).getTime() - 6 * 3600_000)
+            iso = new Date(new Date(iso).getTime() + 86_400_000).toISOString();
+          setBusy(true);
+          const ok = await onSave({
             status,
             actualArrival: needsArrival ? iso : null,
             abortedAt: status === "aborted" ? abortedAt : null,
@@ -534,11 +630,10 @@ function WhatHappened({ t, onSave }: { t: Detail; onSave: (b: Record<string, unk
             expectedDelayMin: needsExpected && expected ? Number(expected) : null,
             notes: notes.trim() || null,
           });
-          setSaved(true);
-          setTimeout(() => setSaved(false), 1500);
+          setBusy(false);
         }}
       >
-        {saved ? "Gespeichert ✓" : "Speichern"}
+        {busy ? <Spinner /> : saved ? "Gespeichert ✓" : "Speichern"}
       </Button>
     </Card>
   );
@@ -568,7 +663,7 @@ function ClaimBox({ t, ent, onDone }: { t: Detail; ent: NonNullable<ReturnType<t
         </p>
       ))}
       {!t.price && <p className="text-xs text-warning">Preis fehlt – oben bei „Ticketdaten“ eintragen, sonst kann die Höhe nicht berechnet werden.</p>}
-      {ent.payable && (
+      {ent.payable && ent.journey && (
         <>
           <details className="text-sm">
             <summary className="cursor-pointer text-muted-foreground">Zusatzkosten / Reservierung</summary>
@@ -596,16 +691,22 @@ function ClaimBox({ t, ent, onDone }: { t: Detail; ent: NonNullable<ReturnType<t
             onClick={async () => {
               setErr(null);
               setBusy(true);
-              const res = await fetch(`/api/trips/${t.id}/claim`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ extra, reservationUnused: reservation }),
-              });
-              const d = await res.json().catch(() => ({}));
-              setBusy(false);
-              if (!res.ok) return setErr(d.error ?? "Fehler");
-              window.open(`/api/attachments/${d.attachment.id}?download`, "_blank");
-              onDone();
+              try {
+                const res = await fetch(`/api/trips/${t.id}/claim`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ extra, reservationUnused: reservation }),
+                });
+                const d = await res.json().catch(() => ({}));
+                if (!res.ok) return setErr(d.error ?? "Fehler");
+                // Same-tab download (attachment): works on iOS Safari, unlike window.open after an await.
+                window.location.assign(`/api/attachments/${d.attachment.id}?download`);
+                onDone();
+              } catch {
+                setErr("Keine Verbindung – bitte erneut versuchen.");
+              } finally {
+                setBusy(false);
+              }
             }}
           >
             {busy ? <Spinner /> : <FileDown className="h-4 w-4" />} Formular ausgefüllt herunterladen
@@ -654,6 +755,7 @@ function ClaimLine({ c, tripId, onSaved }: { c: ClaimRow; tripId: string; onSave
             status: e.target.value,
             ...(e.target.value === "submitted" && !c.submittedAt ? { submittedAt: Date.now() } : {}),
             ...(e.target.value === "paid" && !c.paidAt ? { paidAt: Date.now() } : {}),
+            ...((e.target.value === "paid" || e.target.value === "rejected") && !c.decidedAt ? { decidedAt: Date.now() } : {}),
           })
         }
       >
@@ -667,7 +769,12 @@ function ClaimLine({ c, tripId, onSaved }: { c: ClaimRow; tripId: string; onSave
       {c.status === "paid" && (
         <span className="flex items-center gap-1">
           erhalten
-          <Input className="h-8 w-20" inputMode="decimal" value={paid} onChange={(e) => setPaid(e.target.value)} onBlur={() => save({ paidAmount: paid ? Number(paid.replace(",", ".")) : null })} />€
+          <Input className="h-8 w-20" inputMode="decimal" value={paid} onChange={(e) => setPaid(e.target.value)} onBlur={() => {
+              const n = Number(paid.replace(",", "."));
+              if (!paid.trim()) save({ paidAmount: null });
+              else if (Number.isFinite(n) && n >= 0) save({ paidAmount: Math.round(n * 100) / 100 });
+              else setPaid(c.paidAmount != null ? String(c.paidAmount).replace(".", ",") : "");
+            }} />€
           {day(c.paidAt) && <span className="text-muted-foreground">am {day(c.paidAt)}</span>}
         </span>
       )}

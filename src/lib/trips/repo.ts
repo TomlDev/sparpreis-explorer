@@ -167,10 +167,15 @@ export function deleteTrip(id: string): void {
  *  after a leg's arrival we still attribute to it until the next departs). */
 export function legAt(legs: TripLeg[], at: number): number | null {
   let idx: number | null = null;
-  legs.forEach((l, i) => {
-    if (l.isWalking || !l.plannedDeparture) return;
-    if (new Date(l.plannedDeparture).getTime() - 5 * 60_000 <= at) idx = i;
-  });
+  let prevArrival = -Infinity;
+  for (const [i, l] of legs.entries()) {
+    if (l.isWalking || !l.plannedDeparture) continue;
+    const dep = new Date(l.plannedDeparture).getTime();
+    // Boarding window of 5 min — but not while the previous train is still running.
+    const from = Math.max(dep - 5 * 60_000, prevArrival);
+    if (at >= from) idx = i;
+    if (l.plannedArrival) prevArrival = new Date(l.plannedArrival).getTime();
+  }
   return idx;
 }
 
@@ -334,4 +339,55 @@ export function saveClaim(
   };
   db.insert(claims).values(row).run();
   return row;
+}
+
+/**
+ * Fold a duplicate into `keepId`: claims, events and attachments move over
+ * (files included); what happened (status, abort, notes) is kept when the
+ * target doesn't know it yet. Used for trips first created from a
+ * passenger-rights mail and later imported from the booking.
+ */
+export function mergeTrips(keepId: string, dropId: string): TripRow | null {
+  const keep = db.select().from(trips).where(eq(trips.id, keepId)).get();
+  const drop = db.select().from(trips).where(eq(trips.id, dropId)).get();
+  if (!keep || !drop || keep.id === drop.id) return keep ?? null;
+  db.update(claims).set({ tripId: keepId }).where(eq(claims.tripId, dropId)).run();
+  db.update(tripEvents).set({ tripId: keepId }).where(eq(tripEvents.tripId, dropId)).run();
+  for (const a of db.select().from(attachments).where(eq(attachments.tripId, dropId)).all()) {
+    const rel = `${keepId}/${path.basename(a.path)}`;
+    const from = path.join(/*turbopackIgnore: true*/ uploadsDir(), a.path);
+    const to = path.join(/*turbopackIgnore: true*/ uploadsDir(), rel);
+    fs.mkdirSync(path.dirname(to), { recursive: true, mode: 0o700 });
+    if (fs.existsSync(from)) fs.renameSync(from, to);
+    db.update(attachments).set({ tripId: keepId, path: rel }).where(eq(attachments.id, a.id)).run();
+  }
+  const patch: Partial<TripRow> = {};
+  if (keep.status === "planned" && drop.status !== "planned") patch.status = drop.status;
+  if (!keep.abortedAt && drop.abortedAt) patch.abortedAt = drop.abortedAt;
+  if (keep.expectedDelayMin == null && drop.expectedDelayMin != null) patch.expectedDelayMin = drop.expectedDelayMin;
+  if (keep.price == null && drop.price != null) patch.price = drop.price;
+  if (!keep.actualArrival && drop.actualArrival) patch.actualArrival = drop.actualArrival;
+  if (!keep.actualLegs && drop.actualLegs) patch.actualLegs = drop.actualLegs;
+  if (!keep.returnedToStart && drop.returnedToStart) patch.returnedToStart = true;
+  if (!keep.roundTrip && drop.roundTrip) patch.roundTrip = true;
+  if (drop.notes) patch.notes = keep.notes ? `${keep.notes}\n${drop.notes}` : drop.notes;
+  if (Object.keys(patch).length) db.update(trips).set({ ...patch, updatedAt: now() }).where(eq(trips.id, keepId)).run();
+  deleteTrip(dropId);
+  return db.select().from(trips).where(eq(trips.id, keepId)).get() ?? null;
+}
+
+/** Merge claim-created trips into the booking imported for the same order + day. */
+export function mergeClaimDuplicates(): number {
+  let merged = 0;
+  for (const c of db.select().from(trips).where(eq(trips.source, "claim")).all()) {
+    if (!c.orderNumber) continue;
+    const twin = db
+      .select()
+      .from(trips)
+      .where(and(eq(trips.orderNumber, c.orderNumber), eq(trips.date, c.date)))
+      .all()
+      .find((t) => t.id !== c.id && t.source !== "claim");
+    if (twin && mergeTrips(twin.id, c.id)) merged++;
+  }
+  return merged;
 }

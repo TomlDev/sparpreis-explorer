@@ -20,7 +20,7 @@ import { bahnDeLink } from "@/lib/dbLink";
 import { waitClass, walkWait } from "@/lib/domain/transferWait";
 import { formatTime } from "@/lib/time";
 import { cn, formatDuration, formatEuro } from "@/lib/utils";
-import { Badge, Button, Card } from "@/components/ui";
+import { Badge, Button, Card, buttonClass } from "@/components/ui";
 import { MissChance, ReliabilityBadges, ReliabilityDetails, transferInto } from "@/components/Reliability";
 
 function CoverageBadge({ coverage, reason }: { coverage: SearchResult["coverage"]["coverage"]; reason: string }) {
@@ -305,10 +305,8 @@ export function ResultCard({
           >
             {copied ? <Check className="h-4 w-4 text-[#1B873F]" /> : <Copy className="h-4 w-4" />}
           </Button>
-          <a href={dbHref} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>
-            <Button variant="subtle" size="sm">
-              Bei DB prüfen <ArrowUpRight className="h-4 w-4" />
-            </Button>
+          <a href={dbHref} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className={buttonClass("subtle", "sm")}>
+            Bei DB prüfen <ArrowUpRight className="h-4 w-4" />
           </a>
           <Button
             variant="ghost"

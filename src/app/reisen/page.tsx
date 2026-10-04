@@ -5,9 +5,10 @@ import Link from "next/link";
 import { ChevronLeft, ChevronRight, FileUp, Plus } from "lucide-react";
 import { AppHeader } from "@/components/AppHeader";
 import { Button, Card, Input, Spinner } from "@/components/ui";
+import { BahnCards, CalendarSubscribe, Promos, Reminders, useAccount } from "@/components/trips/AccountPanel";
 import { STATUS, legColor, legLabel } from "@/components/trips/tripUi";
 import type { TripRow } from "@/db/schema";
-import { formatTime } from "@/lib/time";
+import { berlinToIso, formatTime } from "@/lib/time";
 import { cn, formatEuro } from "@/lib/utils";
 
 const WEEKDAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
@@ -33,15 +34,28 @@ export default function TripsPage() {
   const [importing, setImporting] = React.useState(false);
   const [importMsg, setImportMsg] = React.useState<{ ok: boolean; text: string } | null>(null);
   const importRef = React.useRef<HTMLInputElement>(null);
+  const { acc, load: loadAccount, act } = useAccount();
+  const [nextIds, setNextIds] = React.useState<string[]>([]);
+  /** Bumped after an import / new trip → side sections reload (not on month changes). */
+  const [rev, setRev] = React.useState(0);
 
   async function importFiles(files: FileList) {
     setImporting(true);
     setImportMsg(null);
     const fd = new FormData();
     for (const f of Array.from(files)) fd.append("file", f);
-    const d = await fetch("/api/trips/import", { method: "POST", body: fd })
-      .then((r) => r.json())
-      .catch(() => ({ results: [] }));
+    let d: { results?: unknown[] } = {};
+    try {
+      const res = await fetch("/api/trips/import", { method: "POST", body: fd });
+      if (!res.ok) {
+        setImporting(false);
+        return setImportMsg({ ok: false, text: res.status === 413 ? "Import fehlgeschlagen: Datei zu groß" : `Import fehlgeschlagen (${res.status})` });
+      }
+      d = await res.json();
+    } catch {
+      setImporting(false);
+      return setImportMsg({ ok: false, text: "Import fehlgeschlagen – keine Verbindung" });
+    }
     setImporting(false);
     type R = { file: string; error?: string; created?: TripRow[]; updated?: TripRow[]; warnings?: string[]; claims?: unknown[]; skipped?: string };
     const results = (d.results ?? []) as R[];
@@ -66,7 +80,9 @@ export default function TripsPage() {
         .filter(Boolean)
         .join(" · ") || "Nichts gefunden",
     });
-    load();
+    if (!first) load(); // a month change reloads by itself
+    loadAccount();
+    setRev((r) => r + 1);
   }
 
   React.useEffect(() => {
@@ -75,18 +91,30 @@ export default function TripsPage() {
   }, []);
 
   const b = monthBounds(month);
+  // Only the newest request may set the list (fast month clicks, ?m= on first load).
+  const reqId = React.useRef(0);
   const load = React.useCallback(async () => {
-    const d = await fetch(`/api/trips?from=${b.from}&to=${b.to}`).then((r) => r.json());
-    setTrips(d.trips ?? []);
+    const id = ++reqId.current;
+    try {
+      const r = await fetch(`/api/trips?from=${b.from}&to=${b.to}`);
+      const d = r.ok ? await r.json() : { trips: [] };
+      if (id === reqId.current) setTrips(d.trips ?? []);
+    } catch {
+      /* offline: keep what is shown */
+    }
   }, [b.from, b.to]);
   React.useEffect(() => {
-    load().catch(() => {});
+    load();
     window.history.replaceState(null, "", `?m=${month}`);
   }, [load, month]);
 
+  const remindersByDay = new Map<string, string[]>();
+  for (const r of acc?.reminders ?? []) if (r.kind !== "trip") remindersByDay.set(r.date, [...(remindersByDay.get(r.date) ?? []), r.title]);
   const byDay = new Map<string, TripRow[]>();
   for (const t of trips) byDay.set(t.date, [...(byDay.get(t.date) ?? []), t]);
   const today = todayStr();
+  // Trips already shown under "Als Nächstes" aren't repeated below the calendar.
+  const rest = trips.filter((t) => !nextIds.includes(t.id));
   const title = new Date(Date.UTC(b.y, b.m - 1, 15)).toLocaleDateString("de-DE", { month: "long", year: "numeric" });
 
   return (
@@ -108,7 +136,7 @@ export default function TripsPage() {
               }}
             />
             <Button size="sm" variant="outline" disabled={importing} onClick={() => importRef.current?.click()} title="DB-Buchungsmail (.eml), Ticket-PDF oder .ics">
-              {importing ? <Spinner /> : <FileUp className="h-4 w-4" />} Ticket importieren
+              {importing ? <Spinner /> : <FileUp className="h-4 w-4" />} Import
             </Button>
             <Button size="sm" onClick={() => setAdding((a) => !a)}>
               <Plus className="h-4 w-4" /> Eintragen
@@ -116,16 +144,18 @@ export default function TripsPage() {
           </div>
         </div>
         {importMsg && <p className={cn("text-sm", importMsg.ok ? "text-success" : "text-danger")}>{importMsg.text}</p>}
-        <ClaimsSummary key={trips.length + (importMsg?.text ?? "")} />
         {adding && (
           <AddTrip
             onDone={(t) => {
               setAdding(false);
-              if (t) setMonth(t.date.slice(0, 7));
-              load();
+              if (t && t.date.slice(0, 7) !== month) setMonth(t.date.slice(0, 7));
+              else load();
+              setRev((r) => r + 1);
             }}
           />
         )}
+
+        <NextTrips key={`n${rev}`} onShown={setNextIds} />
 
         <Card className="p-3 sm:p-4">
           <div className="mb-3 flex items-center justify-between">
@@ -160,8 +190,13 @@ export default function TripsPage() {
                     list.length === 0 && "opacity-70",
                   )}
                 >
-                  <div className={cn("mb-0.5 text-xs", day === today ? "font-bold text-primary" : "text-muted-foreground")}>
+                  <div className={cn("mb-0.5 flex items-center justify-between text-xs", day === today ? "font-bold text-primary" : "text-muted-foreground")}>
                     {i + 1}
+                    {remindersByDay.has(day) && (
+                      <span title={remindersByDay.get(day)!.join("\n")} className="text-warning">
+                        ⏰
+                      </span>
+                    )}
                   </div>
                   {list.map((t) => (
                     <Link
@@ -182,49 +217,102 @@ export default function TripsPage() {
         </Card>
 
         <div className="space-y-2">
+          {rest.length > 0 && (
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+              {rest.length < trips.length ? "Weitere Fahrten" : "Fahrten"} im {title}
+            </h2>
+          )}
           {trips.length === 0 && (
             <p className="text-sm text-muted-foreground">
               Keine Fahrten in diesem Monat. In der Suche bei einer Verbindung auf <b>„Gebucht“</b> tippen oder oben eine
               Fahrt eintragen.
             </p>
           )}
-          {trips.map((t) => (
-            <Link key={t.id} href={`/reisen/${t.id}`} className="block">
-              <Card className="flex items-center gap-3 p-3 hover:bg-muted/40">
-                <div className="w-24 shrink-0 text-sm">
-                  <div className="font-semibold">
-                    {new Date(`${t.date}T12:00:00Z`).toLocaleDateString("de-DE", { weekday: "short", day: "numeric", month: "short" })}
-                  </div>
-                  <div className="tabular-nums text-xs text-muted-foreground">
-                    {formatTime(t.plannedDeparture)}–{formatTime(t.plannedArrival)}
-                  </div>
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-medium">
-                    {t.originName} → {t.destName}
-                  </div>
-                  <div className="mt-1 flex flex-wrap gap-1">
-                    {t.legs
-                      .filter((l) => !l.isWalking)
-                      .map((l, i) => (
-                        <span key={i} className={cn("rounded px-1.5 py-0.5 text-[10px] font-semibold", legColor(l))}>
-                          {legLabel(l)}
-                        </span>
-                      ))}
-                  </div>
-                </div>
-                <div className="flex shrink-0 flex-col items-end gap-1">
-                  <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-medium", STATUS[t.status]?.cls)}>
-                    {STATUS[t.status]?.label ?? t.status}
-                  </span>
-                  {t.price != null && <span className="text-xs text-muted-foreground">{formatEuro(t.price)}</span>}
-                </div>
-              </Card>
-            </Link>
+          {rest.map((t) => (
+            <TripCard key={t.id} t={t} />
           ))}
         </div>
+
+        {acc && <Reminders list={acc.reminders} />}
+        <ClaimsSummary key={`c${rev}`} />
+        {acc && <BahnCards acc={acc} act={act} />}
+        <Vouchers key={`v${rev}`} />
+        {acc && <Promos list={acc.promos} />}
+        {acc && <CalendarSubscribe url={acc.calendarUrl} act={act} />}
       </main>
     </>
+  );
+}
+
+function TripCard({ t }: { t: TripRow }) {
+  return (
+    <Link href={`/reisen/${t.id}`} className="block">
+      <Card className="flex items-center gap-3 p-3 hover:bg-muted/40">
+        <div className="w-24 shrink-0 text-sm">
+          <div className="font-semibold">
+            {new Date(`${t.date}T12:00:00Z`).toLocaleDateString("de-DE", {
+              weekday: "short",
+              day: "numeric",
+              month: "short",
+            })}
+          </div>
+          <div className="tabular-nums text-xs text-muted-foreground">
+            {t.plannedDeparture ? `${formatTime(t.plannedDeparture)}–${formatTime(t.plannedArrival)}` : "Zeit unbekannt"}
+          </div>
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm font-medium">
+            {t.originName} → {t.destName}
+          </div>
+          <div className="mt-1 flex flex-wrap gap-1">
+            {t.legs
+              .filter((l) => !l.isWalking && (l.product || l.lineName))
+              .map((l, i) => (
+                <span key={i} className={cn("rounded px-1.5 py-0.5 text-[10px] font-semibold", legColor(l))}>
+                  {legLabel(l)}
+                </span>
+              ))}
+            {t.ticket?.scheduleChange?.zugbindungLifted && (
+              <span className="rounded bg-warning/15 px-1.5 py-0.5 text-[10px] font-semibold text-warning">Zugbindung aufgehoben</span>
+            )}
+          </div>
+        </div>
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-medium", STATUS[t.status]?.cls)}>{STATUS[t.status]?.label ?? t.status}</span>
+          {t.price != null && <span className="text-xs text-muted-foreground">{formatEuro(t.price)}</span>}
+        </div>
+      </Card>
+    </Link>
+  );
+}
+
+/** The next trip from today on — independent of the month shown. */
+function NextTrips({ onShown }: { onShown: (ids: string[]) => void }) {
+  const [list, setList] = React.useState<TripRow[] | null>(null);
+  React.useEffect(() => {
+    const from = todayStr();
+    const to = new Date(Date.now() + 365 * 86_400_000).toLocaleDateString("sv-SE", { timeZone: "Europe/Berlin" });
+    fetch(`/api/trips?from=${from}&to=${to}`)
+      .then((r) => (r.ok ? r.json() : { trips: [] }))
+      .then((d) => {
+        const now = Date.now();
+        // still to come (or under way today); skip trips that didn't take place
+        const up = ((d.trips ?? []) as TripRow[]).filter(
+          (t) => !["not_started", "cancelled"].includes(t.status) && (!t.plannedArrival || new Date(t.plannedArrival).getTime() > now - 3600_000),
+        );
+        setList(up.slice(0, 1));
+        onShown(up.slice(0, 1).map((t) => t.id));
+      })
+      .catch(() => setList([]));
+  }, [onShown]);
+  if (!list?.length) return null;
+  return (
+    <div className="space-y-2">
+      <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Nächste Fahrt</h2>
+      {list.map((t) => (
+        <TripCard key={t.id} t={t} />
+      ))}
+    </div>
   );
 }
 
@@ -232,15 +320,9 @@ export default function TripsPage() {
 function AddTrip({ onDone }: { onDone: (t: TripRow | null) => void }) {
   const [f, setF] = React.useState({ from: "", to: "", date: todayStr(), dep: "", arr: "", train: "", price: "", order: "" });
   const [err, setErr] = React.useState<string | null>(null);
+  const [busy, setBusy] = React.useState(false);
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement>) => setF((o) => ({ ...o, [k]: e.target.value }));
-  const iso = (time: string) => {
-    if (!/^\d{2}:\d{2}$/.test(time)) return null;
-    // Local Berlin wall time → ISO with the right offset.
-    const guess = new Date(`${f.date}T${time}:00Z`);
-    const local = new Date(guess.toLocaleString("en-US", { timeZone: "Europe/Berlin" }));
-    const utc = new Date(guess.toLocaleString("en-US", { timeZone: "UTC" }));
-    return new Date(guess.getTime() - (local.getTime() - utc.getTime())).toISOString();
-  };
+  const iso = (time: string) => berlinToIso(f.date, time);
 
   async function save() {
     setErr(null);
@@ -248,19 +330,29 @@ function AddTrip({ onDone }: { onDone: (t: TripRow | null) => void }) {
     let arr = iso(f.arr);
     if (!f.from || !f.to || !dep || !arr) return setErr("Von, Nach, Abfahrt und Ankunft ausfüllen.");
     if (arr < dep) arr = new Date(new Date(arr).getTime() + 86_400_000).toISOString(); // over midnight
-    const res = await fetch("/api/trips", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        source: "manual",
-        price: f.price ? Number(f.price.replace(",", ".")) : null,
-        orderNumber: f.order || null,
-        legs: [{ fromName: f.from, toName: f.to, lineName: f.train || undefined, plannedDeparture: dep, plannedArrival: arr }],
-      }),
-    });
-    const d = await res.json();
-    if (!res.ok) return setErr(d.error ?? "Fehler");
-    onDone(d.trip);
+    const price = f.price.trim() ? Number(f.price.replace(",", ".")) : null;
+    if (price != null && (!Number.isFinite(price) || price < 0)) return setErr("Preis prüfen.");
+    if (busy) return;
+    setBusy(true);
+    try {
+      const res = await fetch("/api/trips", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          source: "manual",
+          price,
+          orderNumber: f.order.trim() || null,
+          legs: [{ fromName: f.from.trim(), toName: f.to.trim(), lineName: f.train.trim() || undefined, plannedDeparture: dep, plannedArrival: arr }],
+        }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) return setErr(d.error ?? "Fehler");
+      onDone(d.trip);
+    } catch {
+      setErr("Keine Verbindung – bitte erneut versuchen.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -281,7 +373,9 @@ function AddTrip({ onDone }: { onDone: (t: TripRow | null) => void }) {
       </div>
       {err && <p className="text-sm text-danger">{err}</p>}
       <div className="flex gap-2">
-        <Button onClick={save}>Speichern</Button>
+        <Button onClick={save} disabled={busy}>
+          {busy ? <Spinner /> : "Speichern"}
+        </Button>
         <Button variant="ghost" onClick={() => onDone(null)}>
           Abbrechen
         </Button>
@@ -299,7 +393,7 @@ interface ClaimsOverview {
   claims: { id: string; caseId: string | null; status: string; paidAmount: number | null; amount: number | null; tripId: string; date: string; route: string }[];
 }
 
-const CLAIM_LABEL: Record<string, string> = { draft: "Formular erstellt", submitted: "eingereicht", paid: "ausgezahlt", rejected: "abgelehnt" };
+const CLAIM_LABEL: Record<string, string> = { draft: "Formular erstellt", submitted: "Eingereicht", paid: "Ausgezahlt", rejected: "Abgelehnt" };
 
 /** Passenger-rights overview: money received, open and rejected claims. */
 function ClaimsSummary() {
@@ -307,8 +401,8 @@ function ClaimsSummary() {
   const [open, setOpen] = React.useState(false);
   React.useEffect(() => {
     fetch("/api/claims")
-      .then((r) => r.json())
-      .then(setD)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((x) => x?.claims && setD(x))
       .catch(() => {});
   }, []);
   if (!d || d.claims.length === 0) return null;
@@ -339,6 +433,126 @@ function ClaimsSummary() {
               </span>
             </Link>
           ))}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+interface Voucher {
+  number: string;
+  value: number;
+  validUntil: string | null;
+  orderNumber: string | null;
+  receivedAt: string;
+  redeemed: boolean;
+}
+
+/** DB vouchers: from mails (remaining value after paying with a voucher) or entered by hand. */
+function Vouchers() {
+  const [list, setList] = React.useState<Voucher[]>([]);
+  const [open, setOpen] = React.useState(false);
+  const [form, setForm] = React.useState({ number: "", value: "", validUntil: "" });
+  const [err, setErr] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    fetch("/api/vouchers")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setList(d?.vouchers ?? []))
+      .catch(() => {});
+  }, []);
+  async function post(body: Record<string, unknown>): Promise<boolean> {
+    setErr(null);
+    try {
+      const res = await fetch("/api/vouchers", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setErr(d.error ?? "Fehler");
+        return false;
+      }
+      setList(d.vouchers ?? []);
+      return true;
+    } catch {
+      setErr("Keine Verbindung");
+      return false;
+    }
+  }
+  const t = todayStr();
+  const openOnes = list.filter((v) => !v.redeemed && (!v.validUntil || v.validUntil >= t)).sort((a, b) => b.value - a.value);
+  const done = list.filter((v) => !openOnes.includes(v)).sort((a, b) => b.receivedAt.localeCompare(a.receivedAt));
+  const sum = openOnes.reduce((x, v) => x + v.value, 0);
+  const row = (v: Voucher) => (
+    <div key={v.number} className={cn("flex flex-wrap items-center gap-x-3 gap-y-1 py-1.5", v.redeemed && "opacity-50")}>
+      <span className="font-mono">{v.number}</span>
+      <Input
+        key={`${v.number}-${v.value}`}
+        className="h-7 w-20 text-right"
+        inputMode="decimal"
+        defaultValue={v.value.toFixed(2).replace(".", ",")}
+        onBlur={(e) => {
+          const raw = e.target.value.trim();
+          const n = Number(raw.replace(",", "."));
+          // empty or not a number → back to the stored amount, never 0 €
+          if (!raw || !Number.isFinite(n) || n < 0) e.target.value = v.value.toFixed(2).replace(".", ",");
+          else if (n !== v.value) post({ action: "update", number: v.number, value: n });
+        }}
+        aria-label="Betrag"
+      />
+      €
+      <span className="text-xs text-muted-foreground">
+        {v.validUntil ? `gültig bis ${new Date(`${v.validUntil}T12:00:00Z`).toLocaleDateString("de-DE")}` : "Gültigkeit unbekannt"}
+        {v.orderNumber ? ` · aus Auftrag ${v.orderNumber}` : ""}
+      </span>
+      <label className="ml-auto flex items-center gap-1 text-xs">
+        <input type="checkbox" checked={v.redeemed} onChange={() => post({ action: "update", number: v.number, redeemed: !v.redeemed })} />{" "}
+        eingelöst
+      </label>
+    </div>
+  );
+  return (
+    <Card className="p-3 sm:p-4">
+      <button className="flex w-full flex-wrap items-baseline gap-x-3 gap-y-1 text-left text-sm" onClick={() => setOpen((o) => !o)}>
+        <span className="font-semibold">Gutscheine</span>
+        {openOnes.length ? (
+          <span>
+            <b>{formatEuro(sum)}</b> offen in {openOnes.length} {openOnes.length === 1 ? "Gutschein" : "Gutscheinen"}
+          </span>
+        ) : (
+          <span className="text-muted-foreground">keine offenen</span>
+        )}
+        <span className="ml-auto text-xs text-muted-foreground">{open ? "ausblenden" : "anzeigen"}</span>
+      </button>
+      {open && (
+        <div className="mt-2 text-sm">
+          <div className="divide-y divide-border">{openOnes.map(row)}</div>
+          <div className="mt-2 flex flex-wrap items-end gap-2 border-t border-border pt-2">
+            <Input className="h-8 w-32 font-mono" placeholder="Nummer" value={form.number} onChange={(e) => setForm({ ...form, number: e.target.value })} />
+            <Input className="h-8 w-24" inputMode="decimal" placeholder="Betrag €" value={form.value} onChange={(e) => setForm({ ...form, value: e.target.value })} />
+            <Input className="h-8 w-36" type="date" value={form.validUntil} onChange={(e) => setForm({ ...form, validUntil: e.target.value })} aria-label="gültig bis" />
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={async () => {
+                const value = Number(form.value.replace(",", "."));
+                if (!form.number.trim() || !form.value.trim() || !Number.isFinite(value) || value <= 0)
+                  return setErr("Nummer und Betrag eintragen.");
+                if (await post({ action: "add", number: form.number, value, validUntil: form.validUntil || null }))
+                  setForm({ number: "", value: "", validUntil: "" });
+              }}
+            >
+              Hinzufügen
+            </Button>
+          </div>
+          {err && <p className="mt-1 text-xs text-danger">{err}</p>}
+          <p className="mt-2 text-xs text-muted-foreground">
+            Zahlst du mit einem Gutschein, stellt die DB für den Rest einen neuen aus (kommt per Mail) – den alten dann als
+            eingelöst abhaken.
+          </p>
+          {done.length > 0 && (
+            <details className="mt-2">
+              <summary className="cursor-pointer text-xs text-muted-foreground">{done.length} eingelöst / abgelaufen</summary>
+              <div className="divide-y divide-border">{done.map(row)}</div>
+            </details>
+          )}
         </div>
       )}
     </Card>

@@ -39,8 +39,8 @@ export function parseClaimConfirmation(text: string): ClaimConfirmation | null {
   const t = flat(text);
   const caseId = /Fall-ID\s+([A-Z0-9]{6,})/.exec(t)?.[1];
   if (!caseId) return null;
-  const start = /Start:\s*(.+?)\s*,\s*(\d{2}\.\d{2}\.\d{4}),\s*(\d{1,2}:\d{2})\s*Uhr/.exec(t);
-  const ziel = /Ziel:\s*(.+?)\s*,\s*(\d{2}\.\d{2}\.\d{4}),\s*(\d{1,2}:\d{2})\s*Uhr/.exec(t);
+  const start = /Start:\s*(.{1,150}?)\s*,\s*(\d{2}\.\d{2}\.\d{4}),\s*(\d{1,2}:\d{2})\s*Uhr/.exec(t);
+  const ziel = /Ziel:\s*(.{1,150}?)\s*,\s*(\d{2}\.\d{2}\.\d{4}),\s*(\d{1,2}:\d{2})\s*Uhr/.exec(t);
   const problem = /Problem:\s*(.+?)\s*(?:Folgende|Persönliche Angaben|$)/.exec(t)?.[1]?.trim() ?? null;
   const pay = /Auszahlung via:\s*(Überweisung|Gutschein)/.exec(t)?.[1];
   return {
@@ -114,10 +114,14 @@ function classify(problem: string | null | undefined): { status: string; type: s
   return { status: "delayed", type: "delay" };
 }
 
-function findClaim(caseId: string, orderNumber: string | null): { claim: ClaimRow | null; trip: TripRow | null } {
+function findClaim(caseId: string, orderNumber: string | null, date: string | null): { claim: ClaimRow | null; trip: TripRow | null } {
   const byCase = db.select().from(claims).where(eq(claims.caseId, caseId)).get();
   if (byCase) return { claim: byCase, trip: db.select().from(trips).where(eq(trips.id, byCase.tripId)).get() ?? null };
-  const trip = orderNumber ? (db.select().from(trips).where(eq(trips.orderNumber, orderNumber)).get() ?? null) : null;
+  // Round trips share one order number → prefer the trip on the travel date.
+  const candidates = orderNumber ? db.select().from(trips).where(eq(trips.orderNumber, orderNumber)).all() : [];
+  // With a known travel date only that day's trip counts (the return of a
+  // round trip is a different trip); no date → any trip of the order.
+  const trip = (date ? candidates.find((t) => t.date === date) : candidates[0]) ?? null;
   // A claim created in the app (form) but not yet linked to a case id.
   const open = trip
     ? (db
@@ -154,6 +158,27 @@ function ensureTrip(
   return updateTrip(created.id, { status: c.status, abortedAt: info.abortedAt ?? null });
 }
 
+/** A known trip learns from the claim what happened (only if nobody said so yet),
+ *  and a trip created from a decision letter gets the times from the receipt. */
+function enrichTrip(
+  trip: TripRow,
+  info: { problem?: string | null; abortedAt?: string | null; from?: string | null; to?: string | null; departure?: string | null; arrival?: string | null },
+  fromReceipt = false,
+): TripRow {
+  const patch: Parameters<typeof updateTrip>[1] = {};
+  // The receipt states what the user claimed → it may correct a status that an
+  // earlier decision letter guessed for a trip created from it.
+  const mayCorrect = trip.status === "planned" || (fromReceipt && trip.source === "claim");
+  if (mayCorrect && info.problem) patch.status = classify(info.problem).status;
+  if (!trip.abortedAt && info.abortedAt) patch.abortedAt = info.abortedAt;
+  const onlyLeg = trip.legs.length === 1 ? trip.legs[0] : null;
+  if (trip.source === "claim" && onlyLeg && !onlyLeg.plannedDeparture && info.departure)
+    patch.legs = [{ ...onlyLeg, fromName: info.from ?? onlyLeg.fromName, toName: info.to ?? onlyLeg.toName, plannedDeparture: info.departure, plannedArrival: info.arrival ?? null }];
+  if (trip.source === "claim" && info.problem && !(trip.notes ?? "").includes(info.problem))
+    patch.notes = `Aus Fahrgastrechte-Antrag: ${info.problem}`;
+  return Object.keys(patch).length ? (updateTrip(trip.id, patch) ?? trip) : trip;
+}
+
 export interface ClaimMailResult {
   kind: "confirmation" | "decision";
   caseId: string;
@@ -163,18 +188,22 @@ export interface ClaimMailResult {
 }
 
 export function applyConfirmation(c: ClaimConfirmation, receivedAt: number): ClaimMailResult | null {
-  const found = findClaim(c.caseId, c.orderNumber);
   const date = c.departure ? new Date(c.departure).toLocaleDateString("sv-SE", { timeZone: TZ }) : null;
-  const trip = ensureTrip(found.trip, { orderNumber: c.orderNumber, date, from: c.from, to: c.to, departure: c.departure, arrival: c.arrival, problem: c.problem, abortedAt: c.abortedAt });
-  if (!trip) return null;
+  const found = findClaim(c.caseId, c.orderNumber, date);
+  const info = { from: c.from, to: c.to, departure: c.departure, arrival: c.arrival, problem: c.problem, abortedAt: c.abortedAt };
+  const known = ensureTrip(found.trip, { orderNumber: c.orderNumber, date, ...info });
+  if (!known) return null;
+  const trip = enrichTrip(known, info, true);
   const k = classify(c.problem);
   const decided = found.claim && (found.claim.status === "paid" || found.claim.status === "rejected");
   const claim = saveClaim(trip.id, {
     id: found.claim?.id,
     caseId: c.caseId,
-    type: found.claim?.type ?? k.type,
+    // The receipt states what was claimed — more precise than a decision's first item.
+    type: c.problem ? k.type : (found.claim?.type ?? k.type),
     status: decided ? found.claim!.status : "submitted",
-    submittedAt: found.claim?.submittedAt ?? receivedAt,
+    // The receipt's own timestamp is the exact submission time.
+    submittedAt: receivedAt,
     payout: c.payout ?? found.claim?.payout ?? "transfer",
     notes: c.problem ?? found.claim?.notes ?? null,
   });
@@ -182,9 +211,10 @@ export function applyConfirmation(c: ClaimConfirmation, receivedAt: number): Cla
 }
 
 export function applyDecision(d: ClaimDecision, pdf?: { name: string; bytes: Buffer }): ClaimMailResult | null {
-  const found = findClaim(d.caseId, d.orderNumber);
-  const trip = ensureTrip(found.trip, { orderNumber: d.orderNumber, date: d.travelDate, from: d.from, to: d.to, problem: d.items[0] ?? null });
-  if (!trip) return null;
+  const found = findClaim(d.caseId, d.orderNumber, d.travelDate);
+  const known = ensureTrip(found.trip, { orderNumber: d.orderNumber, date: d.travelDate, from: d.from, to: d.to, problem: d.items[0] ?? null });
+  if (!known) return null;
+  const trip = enrichTrip(known, { problem: d.items[0] ?? null });
   if (trip.price == null && d.ticketValue != null) updateTrip(trip.id, { price: d.ticketValue });
   const claim = saveClaim(trip.id, {
     id: found.claim?.id,

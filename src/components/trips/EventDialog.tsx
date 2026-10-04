@@ -4,6 +4,7 @@ import * as React from "react";
 import dynamic from "next/dynamic";
 import { Sheet } from "@/components/Sheet";
 import { Button, Input, Spinner } from "@/components/ui";
+import { berlinToIso } from "@/lib/time";
 import type { TripEventRow, TripLeg } from "@/db/schema";
 import type { PickedLocation } from "./LocationPicker";
 import { currentPosition } from "./tripUi";
@@ -20,11 +21,8 @@ const berlinParts = (ms: number) => ({
   time: new Date(ms).toLocaleTimeString("de-DE", { timeZone: TZ, hour: "2-digit", minute: "2-digit" }),
 });
 function berlinMs(date: string, time: string): number | null {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(time)) return null;
-  const guess = new Date(`${date}T${time}:00Z`);
-  const local = new Date(guess.toLocaleString("en-US", { timeZone: TZ }));
-  const utc = new Date(guess.toLocaleString("en-US", { timeZone: "UTC" }));
-  return guess.getTime() - (local.getTime() - utc.getTime());
+  const iso = berlinToIso(date, time);
+  return iso ? new Date(iso).getTime() : null;
 }
 
 /** Last ride that had departed by `at` — its start station centres the map. */
@@ -96,25 +94,30 @@ export function EventDialog({
     setBusy(true);
     setErr(null);
     const body = { type, at: ms, text: text.trim() || null, lat: loc?.lat ?? null, lng: loc?.lng ?? null, accuracy: loc?.accuracy ?? null };
-    const res = event
-      ? await fetch(`/api/trips/${tripId}/events?eventId=${event.id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        })
-      : await fetch(`/api/trips/${tripId}/events`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        });
-    setBusy(false);
-    if (!res.ok) return setErr((await res.json().catch(() => ({}))).error ?? "Speichern fehlgeschlagen");
-    onSaved();
-    onClose();
+    try {
+      const res = event
+        ? await fetch(`/api/trips/${tripId}/events?eventId=${event.id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          })
+        : await fetch(`/api/trips/${tripId}/events`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          });
+      if (!res.ok) return setErr((await res.json().catch(() => ({}))).error ?? "Speichern fehlgeschlagen");
+      onSaved();
+      onClose();
+    } catch {
+      setErr("Keine Verbindung – bitte erneut versuchen.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
-    <Sheet open={open} onClose={onClose} title={event ? "Eintrag bearbeiten" : initialType === "note" ? "Notiz eintragen" : "Kontrolle eintragen"}>
+    <Sheet open={open} onClose={onClose} title={event ? "Eintrag bearbeiten" : type === "note" ? "Notiz eintragen" : "Kontrolle eintragen"}>
       <div className="space-y-3">
         <div className="flex gap-1.5">
           {[
@@ -124,6 +127,7 @@ export function EventDialog({
             <button
               key={k}
               onClick={() => setType(k)}
+              aria-pressed={type === k}
               className={
                 "rounded-full border px-3 py-1.5 text-sm " +
                 (type === k ? "border-primary bg-primary text-primary-foreground" : "border-border hover:bg-muted")

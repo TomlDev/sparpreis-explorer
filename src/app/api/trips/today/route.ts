@@ -11,7 +11,9 @@ export async function GET() {
   const trips = currentTrips(nowMs).map((t) => {
     const dep = t.plannedDeparture ? new Date(t.plannedDeparture).getTime() : null;
     const arr = t.plannedArrival ? new Date(t.plannedArrival).getTime() : null;
-    const phase = dep && nowMs < dep ? "before" : arr && nowMs > arr + 30 * 60_000 ? "after" : "underway";
+    // A train announced late is still under way after its planned arrival.
+    const grace = Math.max(30, t.expectedDelayMin ?? 0, t.ticket?.scheduleChange ? 60 : 0) * 60_000;
+    const phase = dep && nowMs < dep ? "before" : arr && nowMs > arr + grace ? "after" : "underway";
     const legIndex = phase === "underway" ? legAt(t.legs, nowMs) : null;
     const nextIndex = t.legs.findIndex(
       (l) => !l.isWalking && l.plannedDeparture && new Date(l.plannedDeparture).getTime() > nowMs,

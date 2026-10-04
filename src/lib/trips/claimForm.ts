@@ -46,6 +46,36 @@ export interface ClaimFormInput {
 }
 
 const TZ = "Europe/Berlin";
+
+/** Shorten long station names to the field width instead of cutting them off. */
+export function fit(value: string, max: number): string {
+  if (value.length <= max) return value;
+  const short = value
+    .replace(/Hauptbahnhof/g, "Hbf")
+    .replace(/Fernbahnhof|Fernbf\b/g, "Fbf")
+    .replace(/Flughafen/g, "Flugh.")
+    .replace(/Bahnhof/g, "Bf")
+    .replace(/\s*\(([^)]*)\)/g, "($1)")
+    .replace(/ im Schwarzwald/g, "/Schw.")
+    .replace(/Frankfurt\(M(ain)?\)/g, "Ffm");
+  return short.length <= max ? short : short.slice(0, max);
+}
+
+const COUNTRY: Record<string, string> = {
+  deutschland: "", germany: "", d: "", de: "",
+  österreich: "A", austria: "A", schweiz: "CH", switzerland: "CH", niederlande: "NL", belgien: "B",
+  frankreich: "F", luxemburg: "L", dänemark: "DK", polen: "PL", tschechien: "CZ", italien: "I",
+  spanien: "E", portugal: "P", schweden: "S", norwegen: "N", finnland: "FIN", ungarn: "H",
+  großbritannien: "GB", "vereinigtes königreich": "GB", irland: "IRL", liechtenstein: "FL",
+};
+/** International vehicle-style code ("A", "CH", "NL"); "" for Germany. */
+export function countryCode(country: string | null | undefined): string {
+  const c = (country ?? "").trim();
+  if (!c) return "";
+  const known = COUNTRY[c.toLowerCase()];
+  if (known !== undefined) return known;
+  return c.length <= 3 ? c.toUpperCase() : c.slice(0, 3);
+}
 const part = (iso: string, fmt: string) => formatInTimeZone(new Date(iso), TZ, fmt);
 
 export async function fillClaimForm(input: ClaimFormInput): Promise<Uint8Array> {
@@ -56,7 +86,7 @@ export async function fillClaimForm(input: ClaimFormInput): Promise<Uint8Array> 
     const f = form.getField(name);
     if (!(f instanceof PDFTextField)) return;
     const max = f.getMaxLength();
-    f.setText(max ? value.slice(0, max) : value);
+    f.setText(max ? fit(value, max) : value);
   };
   const check = (name: string, on: boolean | undefined) => {
     const f = form.getField(name);
@@ -134,8 +164,9 @@ export async function fillClaimForm(input: ClaimFormInput): Promise<Uint8Array> 
   text("personal_telephone", p.phone);
   text("personal_street", p.street);
   text("personal_housenumber", p.houseNumber);
-  // "Staat (wenn nicht D)" — stays empty for Germany.
-  if (p.country && !/^(d|de|deutschland|germany)$/i.test(p.country.trim())) text("personal_country", p.country);
+  // "Staat (wenn nicht D)" — stays empty for Germany; 3 characters → country code.
+  const country = countryCode(p.country);
+  if (country) text("personal_country", country);
   text("personal_postcode", p.postcode);
   text("personal_city", p.city);
   if (p.email && p.replyByEmail) {

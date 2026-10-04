@@ -51,6 +51,7 @@ export function LocationPicker({
   // Create the map once (Leaflet needs the browser).
   React.useEffect(() => {
     let cancelled = false;
+    let resizeTimer: ReturnType<typeof setTimeout> | undefined;
     import("leaflet").then((mod) => {
       if (cancelled || !box.current || map.current) return;
       const lf = (mod.default ?? mod) as typeof Leaflet;
@@ -64,10 +65,11 @@ export function LocationPicker({
       map.current = m;
       setReady(true);
       // The sheet animates in — recompute size once it has its final layout.
-      setTimeout(() => m.invalidateSize(), 250);
+      resizeTimer = setTimeout(() => map.current?.invalidateSize(), 250);
     });
     return () => {
       cancelled = true;
+      clearTimeout(resizeTimer);
       map.current?.remove();
       map.current = null;
       pin.current = null;
@@ -109,13 +111,17 @@ export function LocationPicker({
   // No location yet → centre on the hinted station.
   React.useEffect(() => {
     if (!ready || value || !hintStation) return;
+    let cancelled = false; // a GPS fix may arrive first — don't pan away from it
     fetch(`/api/locations?q=${encodeURIComponent(hintStation)}`)
       .then((r) => r.json())
       .then((d: { locations?: Hit[] }) => {
         const h = d.locations?.find((x) => x.lat != null && x.lng != null);
-        if (h && map.current) map.current.setView([h.lat!, h.lng!], 12);
+        if (!cancelled && h && map.current) map.current.setView([h.lat!, h.lng!], 12);
       })
       .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, [ready, value, hintStation]);
 
   // Station / place search.
