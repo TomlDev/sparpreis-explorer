@@ -113,6 +113,7 @@ export default function TripPage() {
     else loose.push(e);
   }
   const span = ticketSpan(t);
+  const tripDays = [t.date, ...(t.plannedArrival ? [berlinDay(t.plannedArrival)] : [])];
   const delay = arrivalDelayMin(span.arrival, t.actualArrival);
   const ent = assess({
     status: t.status,
@@ -283,7 +284,7 @@ export default function TripPage() {
                   {l.reservation && <span className="text-xs font-medium text-primary">Platz: {l.reservation}</span>}
                 </div>
                 {(eventsByLeg.get(i) ?? []).map((e) => (
-                  <EventLine key={e.id} e={e} tripId={t.id} onDeleted={load} onEdit={() => setDialog({ event: e, type: e.type === "note" ? "note" : "control" })} />
+                  <EventLine key={e.id} e={e} tripId={t.id} tripDays={tripDays} onDeleted={load} onEdit={() => setDialog({ event: e, type: e.type === "note" ? "note" : "control" })} />
                 ))}
               </div>
             ))}
@@ -292,7 +293,7 @@ export default function TripPage() {
               <span className="font-semibold">{t.destName}</span>
             </div>
             {loose.map((e) => (
-              <EventLine key={e.id} e={e} tripId={t.id} onDeleted={load} onEdit={() => setDialog({ event: e, type: e.type === "note" ? "note" : "control" })} />
+              <EventLine key={e.id} e={e} tripId={t.id} tripDays={tripDays} onDeleted={load} onEdit={() => setDialog({ event: e, type: e.type === "note" ? "note" : "control" })} />
             ))}
           </div>
         </Card>
@@ -408,42 +409,66 @@ export default function TripPage() {
   );
 }
 
-function EventLine({ e, tripId, onDeleted, onEdit }: { e: TripEventRow; tripId: string; onDeleted: () => void; onEdit: () => void }) {
+function EventLine({
+  e,
+  tripId,
+  tripDays,
+  onDeleted,
+  onEdit,
+}: {
+  e: TripEventRow;
+  tripId: string;
+  /** Berlin days the trip runs on – other days get a date in front of the time. */
+  tripDays: string[];
+  onDeleted: () => void;
+  onEdit: () => void;
+}) {
+  const day = berlinDay(e.at);
+  const when = tripDays.includes(day) ? timeOf(e.at) : `${Number(day.slice(8))}.${Number(day.slice(5, 7))}. ${timeOf(e.at)}`;
   return (
-    <div className="ml-12 flex items-center gap-2 border-l-2 border-dashed border-border py-0.5 pl-3 text-xs">
-      {e.type === "control" ? <ShieldCheck className="h-3.5 w-3.5 text-success" /> : <StickyNote className="h-3.5 w-3.5 text-muted-foreground" />}
-      <span className="tabular-nums font-medium">{timeOf(e.at)}</span>
-      <span>{EVENT_LABEL[e.type] ?? e.type}</span>
-      {e.text && <span className="text-muted-foreground">– {e.text}</span>}
-      {e.lat != null && e.lng != null ? (
-        <a
-          href={mapsLink(e.lat, e.lng)}
-          target="_blank"
-          rel="noreferrer"
-          className="inline-flex items-center gap-0.5 text-primary"
-          title={e.accuracy ? `GPS ± ${Math.round(e.accuracy)} m` : "von Hand gesetzt"}
-        >
-          <MapPin className="h-3 w-3" /> Ort
-        </a>
+    <div className="ml-12 flex items-start gap-2 border-l-2 border-dashed border-border py-0.5 pl-3 text-xs">
+      {e.type === "control" ? (
+        <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-success" />
       ) : (
-        <button className="text-primary underline" onClick={onEdit}>
-          Ort setzen
-        </button>
+        <StickyNote className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
       )}
-      <button className="ml-auto text-muted-foreground" onClick={onEdit} aria-label="Bearbeiten">
-        <Pencil className="h-3 w-3" />
-      </button>
-      <button
-        className="text-muted-foreground"
-        onClick={async () => {
-          if (!confirm("Eintrag löschen?")) return;
-          await fetch(`/api/trips/${tripId}/events?eventId=${e.id}`, { method: "DELETE" });
-          onDeleted();
-        }}
-        aria-label="Löschen"
-      >
-        <Trash2 className="h-3 w-3" />
-      </button>
+      <p className="min-w-0 flex-1 break-words">
+        <span className="tabular-nums font-medium">{when}</span> {EVENT_LABEL[e.type] ?? e.type}
+        {e.text && <span className="text-muted-foreground"> – {e.text}</span>}
+      </p>
+      <div className="flex shrink-0 items-center gap-2">
+        {e.lat != null && e.lng != null ? (
+          <a
+            href={mapsLink(e.lat, e.lng)}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-0.5 text-primary"
+            title={e.accuracy ? `GPS ± ${Math.round(e.accuracy)} m` : "von Hand gesetzt"}
+          >
+            <MapPin className="h-3 w-3" /> Ort
+          </a>
+        ) : (
+          e.type === "control" && (
+            <button className="whitespace-nowrap text-primary underline" onClick={onEdit}>
+              Ort setzen
+            </button>
+          )
+        )}
+        <button className="p-0.5 text-muted-foreground" onClick={onEdit} aria-label="Bearbeiten">
+          <Pencil className="h-3 w-3" />
+        </button>
+        <button
+          className="p-0.5 text-muted-foreground"
+          onClick={async () => {
+            if (!confirm("Eintrag löschen?")) return;
+            await fetch(`/api/trips/${tripId}/events?eventId=${e.id}`, { method: "DELETE" });
+            onDeleted();
+          }}
+          aria-label="Löschen"
+        >
+          <Trash2 className="h-3 w-3" />
+        </button>
+      </div>
     </div>
   );
 }

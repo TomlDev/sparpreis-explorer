@@ -25,7 +25,7 @@ export function AppHeader({ center }: { center?: ReactNode }) {
           <span className="hidden lg:inline">Sparpreis-Explorer</span>
         </Link>
         {center ? <div className="min-w-0 flex-1">{center}</div> : <div className="flex-1" />}
-        <nav className="flex shrink-0 items-center gap-1">
+        <nav className="flex shrink-0 items-center gap-0.5 sm:gap-1 [&>*]:h-9 [&>*]:w-9 sm:[&>*]:h-10 sm:[&>*]:w-10">
           <Link href="/reisen" className={buttonClass("ghost", "icon")} aria-label="Reisen" title="Meine Reisen">
             <CalendarDays className="h-5 w-5" />
           </Link>
