@@ -16,6 +16,7 @@ import {
   updateBahnCard,
 } from "@/lib/trips/loyalty";
 import { createTrip } from "@/lib/trips/repo";
+import { addVoucher, deleteVoucher, getVouchers, updateVoucher } from "@/lib/trips/serviceMail";
 
 beforeAll(() => ensureReady());
 
@@ -79,6 +80,16 @@ describe("BahnCard, BahnBonus, Aktionen", () => {
     const r = reminders("2026-10-02");
     expect(r.find((x) => x.id.startsWith("bc-cancel"))).toMatchObject({ date: "2026-12-18", kind: "bahncard" });
     expect(r.find((x) => x.kind === "trip")?.title).toMatch(/Wie lief die Fahrt A → B/);
+  });
+
+  it("ein Teil-Update löscht keine anderen Felder (Gutschein, BahnCard)", () => {
+    addVoucher({ number: "TESTV0001", value: 12.5, validUntil: "2030-01-31" });
+    updateVoucher("TESTV0001", { value: undefined, validUntil: undefined, redeemed: true });
+    expect(getVouchers().find((v) => v.number === "TESTV0001")).toMatchObject({ value: 12.5, validUntil: "2030-01-31", redeemed: true });
+    deleteVoucher("TESTV0001");
+    const c = getBahnCards()[0];
+    updateBahnCard(c.id, { autoRenew: c.autoRenew, validUntil: undefined, cancelBy: undefined });
+    expect(getBahnCards()[0]).toMatchObject({ validUntil: c.validUntil, cancelBy: c.cancelBy });
   });
 
   it("eine gekündigte BahnCard gilt bis zum Ende weiter, ohne Kündigungs-Erinnerung", () => {

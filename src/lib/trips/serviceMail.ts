@@ -155,7 +155,9 @@ export function setVoucherRedeemed(number: string, redeemed: boolean): Voucher[]
 }
 
 export function updateVoucher(number: string, patch: Partial<Pick<Voucher, "value" | "validUntil" | "redeemed">>): Voucher[] {
-  const list = getVouchers().map((v) => (v.number === number ? { ...v, ...patch } : v));
+  // Only the fields given — `{ value: undefined }` must not wipe the amount.
+  const set = Object.fromEntries(Object.entries(patch).filter(([, x]) => x !== undefined));
+  const list = getVouchers().map((v) => (v.number === number ? { ...v, ...set } : v));
   setSetting("vouchers", list);
   return list;
 }

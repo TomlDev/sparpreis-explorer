@@ -133,7 +133,8 @@ export function saveBahnCard(part: Partial<BahnCard>, receivedAt: Date): BahnCar
 export function updateBahnCard(id: string, patch: Partial<Pick<BahnCard, "validUntil" | "autoRenew" | "confirmed" | "cancelled" | "cancelBy">>): BahnCard[] {
   const list = getBahnCards().map((c) => {
     if (c.id !== id) return c;
-    const next = { ...c, ...patch };
+    // Only the fields given — `{ validUntil: undefined }` must not wipe the date.
+    const next = { ...c, ...Object.fromEntries(Object.entries(patch).filter(([, x]) => x !== undefined)) };
     // New end date → recompute the cancellation deadline unless given explicitly.
     if (patch.validUntil && patch.cancelBy === undefined) next.cancelBy = addDays(patch.validUntil, -42);
     return next;
