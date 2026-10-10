@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -27,8 +28,10 @@ export function Sheet({
   }, [open, onClose]);
 
   if (!open) return null;
-  return (
-    <div className="fixed inset-0 z-50">
+  // Into <body>: opened from inside a floating panel it would otherwise sit in that
+  // panel's layer, under the header and the floating buttons.
+  return createPortal(
+    <div className="fixed inset-0 z-[60]">
       <div
         className="absolute inset-0 bg-black/50 animate-in"
         onClick={onClose}
@@ -54,6 +57,7 @@ export function Sheet({
           {children}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

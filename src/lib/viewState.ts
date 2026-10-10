@@ -22,6 +22,7 @@ import { WINDOW_LABELS, windowToHHmm } from "@/lib/time";
  *   cmp             compare selection (comma-separated fingerprints)
  *   view            open dialog: filters | calendar | compare
  *   day=1           whole-day scan (cheapest Flex connection of the day)
+ *   g=1 | g=0       results grouped by price / as a list (default: grouped in the day scan)
  */
 export type TimeMode = "departure" | "arrival";
 export type SearchModeKey = "fast" | "thorough" | "deep";
@@ -44,6 +45,8 @@ export interface ViewState {
   dialog: ViewDialog | null;
   /** Whole-day scan instead of the time window. */
   day: boolean;
+  /** Grouped by price (null = the default: grouped in the day scan, a list otherwise). */
+  grouped: boolean | null;
 }
 
 export const DEFAULT_VIEW: ViewState = {
@@ -62,6 +65,7 @@ export const DEFAULT_VIEW: ViewState = {
   compare: [],
   dialog: null,
   day: false,
+  grouped: null,
 };
 
 const SORTS: SortMode[] = [
@@ -150,6 +154,7 @@ export function parseView(input: URLSearchParams | string): ViewState {
     compare: fpList(q.get("cmp")).slice(0, 3),
     dialog: dialog && DIALOGS.includes(dialog) ? dialog : null,
     day: q.get("day") === "1",
+    grouped: q.get("g") === "1" ? true : q.get("g") === "0" ? false : null,
   };
 }
 
@@ -174,6 +179,7 @@ export function serializeView(v: ViewState): string {
   if (v.compare.length) q.set("cmp", v.compare.join(","));
   if (v.dialog) q.set("view", v.dialog);
   if (v.day) q.set("day", "1");
+  if (v.grouped != null && v.grouped !== v.day) q.set("g", v.grouped ? "1" : "0");
   // URLSearchParams escapes "," and ":" — keep them readable in the link.
   return q.toString().replace(/%2C/gi, ",").replace(/%3A/gi, ":");
 }

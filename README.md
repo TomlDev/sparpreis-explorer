@@ -62,10 +62,13 @@ So entstehen die Zahlen:
 - **Nur Umstiege im Ticket zählen:** Oft gilt der Sparpreis nur für einen Teil der Strecke
   („Gilt nur für …“), etwa ohne die Straßenbahn am Anfang. Ein Umstieg außerhalb des Tickets
   hebt keine Zugbindung auf und ist ungeschützt. Die App liest den echten Geltungsbereich bei
-  der DB aus, markiert solche Abschnitte („nicht im Ticket“) und warnt vor knappen
+  der DB aus, zeigt ihn an jeder Verbindung („🎫 Gilt nur für Essen-Steele – Freiburg“),
+  markiert solche Abschnitte („nicht im Ticket“) und warnt vor knappen
   ungeschützten Umstiegen, je nach Verkehrsmittel: nach Tram und U-Bahn unter 3 min, nach
   Bussen unter 7 min, nach Zügen unter 10 min. Fehlt ein Zug im Ticket, ist die Verbindung rot
-  und fliegt aus der Liste (außer das Deutschland-Ticket deckt den Nahverkehr ab).
+  und fliegt aus der Liste (außer das Deutschland-Ticket deckt den Nahverkehr ab). Die Suche
+  prüft das für alle angezeigten Preise; ist einer noch nicht geprüft, steht
+  „⚠ Geltungsbereich ungeprüft“ daran, und Aufklappen holt die Prüfung sofort nach.
 
 Die Daten stammen aus dem offenen Datensatz
 [piebro/deutsche-bahn-data](https://huggingface.co/datasets/piebro/deutsche-bahn-data) und
@@ -81,8 +84,9 @@ Flex-Verbindung“** einschalten und ein Datum wählen:
    DB-Schnittstellen, dauert ein paar Minuten).
 2. Sie nimmt nur Tickets mit **genau einem Fernverkehrs-Abschnitt**: das kurze ICE-Stück,
    das den Sparpreis möglich macht.
-3. Vorab wird ausgesiebt: **Min. Flex**, **Max. Anschluss** und **Max. Preis** stehen direkt
-   in der Suche und bestimmen schon, welche Kandidaten überhaupt einen Preis abfragen.
+3. Vorab wird ausgesiebt: **Min. Flex** (Standard 65 %), **Max. Anschluss** (30 %) und
+   **Max. Preis** (40 €) stehen direkt in der Suche und bestimmen schon, welche Kandidaten
+   überhaupt einen Preis abfragen.
 4. Das Ergebnis ist **nach Preis gruppiert**: je Preis eine Zeile pro Verbindung mit
    Anschluss- und Flex-Wert ganz vorne. Bei gleichem Preis steht die Verbindung zuerst, die
    eher platzt (niedrigere Anschluss-Quote, dann höhere Flex-Chance).
@@ -132,9 +136,13 @@ Gebucht ist ein günstiges Ticket mit hoher Flex-Chance, jetzt zählt der Tag se
 - **Nur gültige Tickets:** Ein grüner Haken bedeutet: Das Ticket deckt alle Züge der
   Verbindung ab.
 - **Kalender:** zeigt den günstigsten Preis pro Tag.
+- **Gutscheine griffbereit:** Oben rechts in der Suche stehen deine offenen DB-Gutscheine;
+  ein Tipp zeigt die Nummern mit Kopier-Knopf zum Einlösen auf bahn.de.
 - **Filter und Sortierung:** Preis, Dauer, Umstiege, ICE-Anteil, Fernverkehrs-Abschnitte,
   Flex-Chance, Anschluss-Quote, Ankunfts- statt Abfahrtszeit und mehr.
-- **Teilen:** Die komplette Ansicht steckt in der URL, ein Link zeigt genau das, was du siehst.
+- **Alles in der URL:** Suche, Filter, Sortierung, Gruppierung und aufgeklappte Verbindungen
+  stehen jederzeit in der Adresse – Neuladen oder ein geteilter Link zeigt genau das, was du
+  siehst (die Ergebnisse kommen dabei aus dem Cache, ohne neue Abfragen).
 - **Wird mit der Zeit besser:** Die App merkt sich Strecken, Umstiegsbahnhöfe und Preise
   deiner Suchen und findet auf der Stammstrecke schneller Treffer.
 

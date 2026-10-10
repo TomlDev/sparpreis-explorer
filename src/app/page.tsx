@@ -11,6 +11,7 @@ import { RELIABILITY_NOTE } from "@/components/Reliability";
 import { CompareView } from "@/components/CompareView";
 import { FiltersSheet } from "@/components/FiltersSheet";
 import { ResultCard } from "@/components/results";
+import { VoucherQuick } from "@/components/VoucherQuick";
 import { Button, Card, Chip, Input, ProgressBar, Spinner, Switch } from "@/components/ui";
 import { useSearch } from "@/hooks/useSearch";
 import type { SearchResult } from "@/lib/domain/result";
@@ -26,6 +27,9 @@ interface Endpoint {
   key: string;
   label: string;
 }
+
+/** Whole-day scan starts with these limits (one Fernverkehr leg, likely to break, cheap). */
+const DAY_DEFAULTS = { maxFvLegs: 1, minFlexPct: 65, maxOkPct: 30, maxPrice: 40 } as const;
 
 const MODES: { key: "fast" | "thorough" | "deep"; label: string; hint: string }[] = [
   { key: "fast", label: "Schnell", hint: "Cache + wenige Abfragen" },
@@ -43,7 +47,7 @@ export default function Page() {
 
 function Home() {
   const urlParams = useSearchParams();
-  const { state, run: runSearch, abort } = useSearch();
+  const { state, run: runSearch, abort, patch: patchResult } = useSearch();
   // The whole view lives in the URL (see lib/viewState) so a copied link
   // restores exactly what was on screen. Parsed once; the URL is then kept in
   // sync with the state below.
@@ -64,20 +68,22 @@ function Home() {
   // Whole-day scan: cheapest connection with one Fernverkehr leg and a high Flex chance.
   const [dayScan, setDayScan] = React.useState(initialView.day);
   // Results grouped by price — the default for the day scan, a toggle next to the sorting.
-  const [grouped, setGrouped] = React.useState(initialView.day);
-  const beforeDayScan = React.useRef<{ sort: SortMode; maxFvLegs: number | null; minFlexPct: number | null } | null>(null);
+  const [grouped, setGrouped] = React.useState(initialView.grouped ?? initialView.day);
+  type DayLimits = Pick<SearchFilters, "maxFvLegs" | "minFlexPct" | "maxOkPct" | "maxPrice">;
+  const beforeDayScan = React.useRef<({ sort: SortMode } & DayLimits) | null>(null);
   function toggleDayScan(on: boolean) {
     setDayScan(on);
     setGrouped(on);
     if (on) {
-      beforeDayScan.current = { sort, maxFvLegs: filters.maxFvLegs, minFlexPct: filters.minFlexPct };
+      const { maxFvLegs, minFlexPct, maxOkPct, maxPrice } = filters;
+      beforeDayScan.current = { sort, maxFvLegs, minFlexPct, maxOkPct, maxPrice };
       setSort("cheapest");
-      setFilters({ ...filters, maxFvLegs: 1, minFlexPct: filters.minFlexPct ?? 50 });
+      setFilters({ ...filters, ...DAY_DEFAULTS });
       if (mode === "fast") setMode("thorough");
     } else if (beforeDayScan.current) {
-      const b = beforeDayScan.current;
-      setSort(b.sort);
-      setFilters({ ...filters, maxFvLegs: b.maxFvLegs, minFlexPct: b.minFlexPct });
+      const { sort: before, ...limits } = beforeDayScan.current;
+      setSort(before);
+      setFilters({ ...filters, ...limits });
       beforeDayScan.current = null;
     }
   }
@@ -344,6 +350,7 @@ function Home() {
       referencePrice={effectiveReference}
       isReference={r.fingerprint === referenceFp}
       onSetReference={() => chooseReference(r.fingerprint, r.coverage.price ?? null)}
+      onUpdate={patchResult}
       open={openCards.has(r.fingerprint)}
       onOpenChange={(o) => setCardOpen(r.fingerprint, o)}
     />
@@ -360,11 +367,12 @@ function Home() {
     </Chip>
   );
 
-  // ---- Shareable view: keep the URL = what is on screen ----
+  // ---- Shareable view: the URL always holds the whole page — search form, filters,
+  // sorting, open cards … — so a reload or a pasted link brings back exactly this.
   const viewQuery = serializeView({
-    origin: shown?.origin ?? origin?.key ?? null,
-    dest: shown?.dest ?? dest?.key ?? null,
-    date: shown?.date ?? travelDate,
+    origin: origin?.key ?? shown?.origin ?? null,
+    dest: dest?.key ?? shown?.dest ?? null,
+    date: travelDate,
     timeFrom: timeWindow,
     timeTo,
     timeMode,
@@ -377,9 +385,10 @@ function Home() {
     compare: [...compare],
     dialog: filtersOpen ? "filters" : calendarOpen ? "calendar" : compareOpen ? "compare" : null,
     day: dayScan,
+    grouped,
   });
   React.useEffect(() => {
-    if (!shown) return; // nothing searched yet → keep the URL clean
+    if (!origin || !dest) return; // profiles not loaded yet — don't drop a link's route
     if (window.location.search.replace(/^\?/, "") === viewQuery) return;
     window.history.replaceState(null, "", `${window.location.pathname}?${viewQuery}`);
   }, [shown, viewQuery]);
@@ -813,48 +822,47 @@ function Home() {
         </div>
       </main>
 
-      {/* Floating "clear search" button — bottom-left */}
-      <button
-        type="button"
-        onClick={clearSearch}
-        disabled={clearing}
-        className="fixed bottom-4 left-4 z-50 flex items-center gap-2 rounded-full border border-border bg-card px-4 py-2.5 text-sm font-medium text-muted-foreground shadow-lg transition hover:bg-muted hover:text-foreground disabled:opacity-60"
-        title="Aktuelle Suche leeren (Server-Cache, gelernte Daten & Browser)"
-      >
-        {clearing ? <Spinner /> : <Trash2 className="h-4 w-4" />}
-        <span>Suche leeren</span>
-      </button>
+      {/* Floating actions — bottom-right: "clear search" right above "load more prices" */}
+      <div className={"fixed right-4 z-50 flex flex-col items-end gap-2 " + (compare.size >= 2 ? "bottom-20" : "bottom-4")}>
+        <button
+          type="button"
+          onClick={clearSearch}
+          disabled={clearing}
+          className="flex items-center gap-2 rounded-full border border-border bg-card px-4 py-2.5 text-sm font-medium text-muted-foreground shadow-lg transition hover:bg-muted hover:text-foreground disabled:opacity-60"
+          title="Aktuelle Suche leeren (Server-Cache, gelernte Daten & Browser)"
+        >
+          {clearing ? <Spinner /> : <Trash2 className="h-4 w-4" />}
+          <span>Suche leeren</span>
+        </button>
 
-      {/* Floating "load more prices" button — always visible, with counts */}
-      <button
-        type="button"
-        onClick={loadMorePrices}
-        disabled={state.running || nothingMoreToPrice}
-        className={
-          "fixed right-4 z-50 flex items-center gap-2 rounded-full bg-primary py-2.5 pl-4 pr-4 text-primary-foreground shadow-lg transition hover:opacity-90 disabled:opacity-60 " +
-          (compare.size >= 2 ? "bottom-20" : "bottom-4")
-        }
-        aria-label="Mehr Preise laden"
-        title={
-          nothingMoreToPrice
-            ? "Alle bepreisbaren Kandidaten der aktuellen Suche sind geprüft"
-            : "Weitere Kandidaten der aktuellen Suche bepreisen (gleiche Route, kein neuer Fahrplan-Abruf)"
-        }
-      >
-        {state.running ? <Spinner /> : <CircleDollarSign className="h-5 w-5 shrink-0" />}
-        <span className="flex flex-col items-start leading-tight">
-          <span className="text-sm font-medium">
-            {nothingMoreToPrice
-              ? "Alle Preise geladen"
-              : priceableRemaining != null
-                ? `Mehr Preise laden (${priceableRemaining})`
-                : "Mehr Preise laden"}
+        {/* "load more prices" — always visible, with counts */}
+        <button
+          type="button"
+          onClick={loadMorePrices}
+          disabled={state.running || nothingMoreToPrice}
+          className="flex items-center gap-2 rounded-full bg-primary py-2.5 pl-4 pr-4 text-primary-foreground shadow-lg transition hover:opacity-90 disabled:opacity-60"
+          aria-label="Mehr Preise laden"
+          title={
+            nothingMoreToPrice
+              ? "Alle bepreisbaren Kandidaten der aktuellen Suche sind geprüft"
+              : "Weitere Kandidaten der aktuellen Suche bepreisen (gleiche Route, kein neuer Fahrplan-Abruf)"
+          }
+        >
+          {state.running ? <Spinner /> : <CircleDollarSign className="h-5 w-5 shrink-0" />}
+          <span className="flex flex-col items-start leading-tight">
+            <span className="text-sm font-medium">
+              {nothingMoreToPrice
+                ? "Alle Preise geladen"
+                : priceableRemaining != null
+                  ? `Mehr Preise laden (${priceableRemaining})`
+                  : "Mehr Preise laden"}
+            </span>
+            <span className="text-[11px] opacity-85">
+              {pricedCount} Preise · {totalCount} Verbindungen
+            </span>
           </span>
-          <span className="text-[11px] opacity-85">
-            {pricedCount} Preise · {totalCount} Verbindungen
-          </span>
-        </span>
-      </button>
+        </button>
+      </div>
 
       {/* Compare bar */}
       {compare.size >= 2 && (
@@ -868,90 +876,91 @@ function Home() {
         </div>
       )}
 
-      {/* Floating filter panel — left screen edge (mirror of the sort stack) */}
-      {displayResults.length > 0 && (
-        <div className="fixed left-3 top-20 z-40 hidden w-64 flex-col gap-1 rounded-2xl border border-border bg-card/95 p-3 shadow-lg backdrop-blur lg:flex">
-          <span className="px-1 pb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Filter</span>
-          <Switch
-            label="Nur Original (DB)"
-            checked={filters.onlyOriginal}
-            onChange={(v) => setFilters({ ...filters, onlyOriginal: v })}
-          />
-          <Switch
-            label="Nur günstigere"
-            checked={filters.belowReference}
-            onChange={(v) => setFilters({ ...filters, belowReference: v })}
-          />
-          <Switch
-            label="Start-Fallback"
-            checked={filters.useFallback}
-            onChange={(v) => setFilters({ ...filters, useFallback: v })}
-          />
-          <Button size="sm" variant="outline" className="mt-2" onClick={() => setFiltersOpen(true)}>
-            Alle Filter …
-          </Button>
-        </div>
-      )}
-
-      {/* Floating reference panel — left screen edge, with controls */}
-      {referenceResult && (
-        <div className="fixed left-3 top-1/2 z-40 hidden w-64 -translate-y-1/2 flex-col gap-1.5 rounded-2xl border border-primary/40 bg-card/95 p-3 shadow-lg backdrop-blur lg:flex">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wide text-primary">Referenz</span>
-            <button
-              type="button"
-              onClick={() => {
-                setReferencePrice(null);
-                setReferenceFp(null);
-              }}
-              className="rounded px-1.5 text-lg leading-none text-muted-foreground hover:bg-muted"
-              aria-label="Referenz zurücksetzen"
-              title="Referenz zurücksetzen"
-            >
-              ×
-            </button>
-          </div>
-          <div className="text-base font-semibold tabular-nums">
-            {formatTime(referenceResult.metrics.plannedDeparture)}–{formatTime(referenceResult.metrics.plannedArrival)}
-          </div>
-          <div className="truncate text-xs text-muted-foreground">
-            {referenceResult.metrics.originName} → {referenceResult.metrics.destinationName}
-          </div>
-          {referenceResult.coverage.price != null && (
-            <div className="text-xl font-bold leading-none">{formatEuro(referenceResult.coverage.price)}</div>
+      {/* Left screen edge (desktop): filters, sorting below, then the reference */}
+      {(displayResults.length > 0 || referenceResult) && (
+        <div className="fixed left-3 top-20 z-40 hidden max-h-[calc(100vh-6rem)] w-64 flex-col gap-3 overflow-y-auto pb-2 lg:flex">
+          {displayResults.length > 0 && (
+            <div className="flex flex-col gap-1 rounded-2xl border border-border bg-card/95 p-3 shadow-lg backdrop-blur">
+              <span className="px-1 pb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Filter</span>
+              <Switch
+                label="Nur Original (DB)"
+                checked={filters.onlyOriginal}
+                onChange={(v) => setFilters({ ...filters, onlyOriginal: v })}
+              />
+              <Switch
+                label="Nur günstigere"
+                checked={filters.belowReference}
+                onChange={(v) => setFilters({ ...filters, belowReference: v })}
+              />
+              <Switch
+                label="Start-Fallback"
+                checked={filters.useFallback}
+                onChange={(v) => setFilters({ ...filters, useFallback: v })}
+              />
+              <Button size="sm" variant="outline" className="mt-2" onClick={() => setFiltersOpen(true)}>
+                Alle Filter …
+              </Button>
+            </div>
           )}
-          <div className="truncate text-[11px] text-muted-foreground">{referenceResult.chainLabel}</div>
-          <Button
-            size="sm"
-            variant="outline"
-            className="mt-1"
-            disabled={state.running}
-            onClick={() => chooseReference(referenceResult.fingerprint, referenceResult.coverage.price ?? null)}
-          >
-            Alternativen neu suchen
-          </Button>
+          {displayResults.length > 0 && (
+            <div className="flex flex-col items-stretch gap-1.5 rounded-2xl border border-border bg-card/95 p-2 shadow-lg backdrop-blur">
+              <div className="flex items-center justify-between gap-2">
+                <span className="px-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Sortierung</span>
+                {groupToggle}
+              </div>
+              {(Object.keys(SORT_LABELS) as SortMode[]).map((s) => (
+                <Chip key={s} type="button" active={sort === s} onClick={() => setSort(s)}>
+                  {SORT_LABELS[s]}
+                </Chip>
+              ))}
+            </div>
+          )}
+          {referenceResult && (
+            <div className="flex flex-col gap-1.5 rounded-2xl border border-primary/40 bg-card/95 p-3 shadow-lg backdrop-blur">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold uppercase tracking-wide text-primary">Referenz</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setReferencePrice(null);
+                    setReferenceFp(null);
+                  }}
+                  className="rounded px-1.5 text-lg leading-none text-muted-foreground hover:bg-muted"
+                  aria-label="Referenz zurücksetzen"
+                  title="Referenz zurücksetzen"
+                >
+                  ×
+                </button>
+              </div>
+              <div className="text-base font-semibold tabular-nums">
+                {formatTime(referenceResult.metrics.plannedDeparture)}–{formatTime(referenceResult.metrics.plannedArrival)}
+              </div>
+              <div className="truncate text-xs text-muted-foreground">
+                {referenceResult.metrics.originName} → {referenceResult.metrics.destinationName}
+              </div>
+              {referenceResult.coverage.price != null && (
+                <div className="text-xl font-bold leading-none">{formatEuro(referenceResult.coverage.price)}</div>
+              )}
+              <div className="truncate text-[11px] text-muted-foreground">{referenceResult.chainLabel}</div>
+              <Button
+                size="sm"
+                variant="outline"
+                className="mt-1"
+                disabled={state.running}
+                onClick={() => chooseReference(referenceResult.fingerprint, referenceResult.coverage.price ?? null)}
+              >
+                Alternativen neu suchen
+              </Button>
+            </div>
+          )}
         </div>
       )}
 
       {/* Floating status/hint notices — top-right (desktop) */}
-      <div className="fixed right-3 top-20 z-30 hidden max-h-[40vh] w-64 flex-col gap-2 overflow-auto lg:flex">
+      <div className="fixed right-3 top-20 z-30 hidden max-h-[60vh] w-64 flex-col gap-2 overflow-auto lg:flex">
+        <VoucherQuick className="w-full" />
         {infoNotices}
       </div>
-
-      {/* Floating sort controls — right screen edge, vertically stacked */}
-      {displayResults.length > 0 && (
-        <div className="fixed right-3 top-1/2 z-40 hidden -translate-y-1/2 flex-col items-stretch gap-1.5 rounded-2xl border border-border bg-card/95 p-2 shadow-lg backdrop-blur lg:flex">
-          <div className="flex items-center justify-between gap-2">
-            <span className="px-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Sortierung</span>
-            {groupToggle}
-          </div>
-          {(Object.keys(SORT_LABELS) as SortMode[]).map((s) => (
-            <Chip key={s} type="button" active={sort === s} onClick={() => setSort(s)}>
-              {SORT_LABELS[s]}
-            </Chip>
-          ))}
-        </div>
-      )}
 
       <FiltersSheet open={filtersOpen} onClose={() => setFiltersOpen(false)} filters={filters} onChange={setFilters} />
       <CompareView open={compareOpen} onClose={() => setCompareOpen(false)} results={compareResults} />

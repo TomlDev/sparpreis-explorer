@@ -4,6 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import { ChevronLeft, ChevronRight, FileUp, Plus } from "lucide-react";
 import { AppHeader } from "@/components/AppHeader";
+import { CopyCode } from "@/components/CopyCode";
 import { Button, Card, Input, Spinner } from "@/components/ui";
 import { BahnCards, CalendarSubscribe, Promos, Reminders, useAccount } from "@/components/trips/AccountPanel";
 import { STATUS, legColor, legLabel } from "@/components/trips/tripUi";
@@ -120,7 +121,7 @@ export default function TripsPage() {
   }, [b.gridFrom, b.gridTo]);
   React.useEffect(() => {
     load();
-    window.history.replaceState(null, "", `?m=${month}`);
+    window.history.replaceState(null, "", `?m=${month}${window.location.hash}`); // keep #gutscheine etc.
   }, [load, month]);
 
   const remindersByDay = new Map<string, string[]>();
@@ -516,12 +517,20 @@ interface Voucher {
 function Vouchers() {
   const [list, setList] = React.useState<Voucher[]>([]);
   const [open, setOpen] = React.useState(false);
+  // opened via "Verwalten" in the search's voucher card (runs before the page rewrites the URL)
+  React.useEffect(() => {
+    if (window.location.hash === "#gutscheine") setOpen(true);
+  }, []);
   const [form, setForm] = React.useState({ number: "", value: "", validUntil: "" });
   const [err, setErr] = React.useState<string | null>(null);
   React.useEffect(() => {
     fetch("/api/vouchers")
       .then((r) => (r.ok ? r.json() : null))
-      .then((d) => setList(d?.vouchers ?? []))
+      .then((d) => {
+        setList(d?.vouchers ?? []);
+        if (window.location.hash === "#gutscheine")
+          requestAnimationFrame(() => document.getElementById("gutscheine")?.scrollIntoView({ block: "start" }));
+      })
       .catch(() => {});
   }, []);
   async function post(body: Record<string, unknown>): Promise<boolean> {
@@ -546,7 +555,7 @@ function Vouchers() {
   const sum = openOnes.reduce((x, v) => x + (v.value ?? 0), 0);
   const row = (v: Voucher) => (
     <div key={v.number} className={cn("flex flex-wrap items-center gap-x-3 gap-y-1 py-1.5", v.redeemed && "opacity-50")}>
-      <span className="font-mono">{v.number}</span>
+      <CopyCode code={v.number} />
       <Input
         key={`${v.number}-${v.value}`}
         className="h-7 w-20 text-right"
@@ -574,7 +583,7 @@ function Vouchers() {
     </div>
   );
   return (
-    <Card className="p-3 sm:p-4">
+    <Card id="gutscheine" className="scroll-mt-20 p-3 sm:p-4">
       <button className="flex w-full flex-wrap items-baseline gap-x-3 gap-y-1 text-left text-sm" onClick={() => setOpen((o) => !o)}>
         <span className="font-semibold">Gutscheine</span>
         {openOnes.length ? (

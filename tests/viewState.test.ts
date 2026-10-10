@@ -19,6 +19,7 @@ describe("Ansicht in der URL", () => {
       open: ["6f4394c563dfb9e52f957d98", "a03f1cf5a39f679212b7c48d"],
       compare: ["aa9edfd160b3567faf574e03"],
       day: true,
+      grouped: false,
       dialog: "filters",
     };
     const q = serializeView(v);
@@ -27,6 +28,15 @@ describe("Ansicht in der URL", () => {
     expect(q).toContain("open=6f4394c563dfb9e52f957d98,a03f1cf5a39f679212b7c48d");
     expect(q).toContain("tw=14:00");
     expect(serializeView(parseView(q))).toBe(q);
+  });
+
+  it("Gruppierung: nur in der URL, wenn sie vom Standard abweicht (Ganzer Tag = gruppiert)", () => {
+    const base = { ...DEFAULT_VIEW, date: "2026-10-16" };
+    expect(serializeView({ ...base, day: true, grouped: true })).not.toContain("g=");
+    expect(serializeView({ ...base, day: true, grouped: false })).toContain("g=0");
+    expect(serializeView({ ...base, grouped: true })).toContain("g=1");
+    expect(parseView(serializeView({ ...base, grouped: true })).grouped).toBe(true);
+    expect(parseView("date=2026-10-16").grouped).toBeNull();
   });
 
   it("lässt Standardwerte weg und schreibt nur abweichende Filter", () => {
