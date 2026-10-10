@@ -1,0 +1,1 @@
+ALTER TABLE `trip_events` ADD `context` text;

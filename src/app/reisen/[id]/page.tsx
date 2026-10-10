@@ -11,7 +11,7 @@ import { STATUS, legColor, legLabel, mapsLink, uploadFiles } from "@/components/
 import type { AttachmentRow, ClaimRow, TripEventRow, TripRow } from "@/db/schema";
 import { berlinDay, berlinToIso, formatTime, todayLocal } from "@/lib/time";
 import { delayMin, realtimeSummary, type RealtimeSummary } from "@/lib/trips/realtime";
-import { arrivalDelayMin, assess, liveHints, ticketSpan } from "@/lib/trips/rules";
+import { arrivalDelayMin, assess, liveHints, onlineClaimType, ticketSpan, type OnlineClaimType } from "@/lib/trips/rules";
 import { cn, formatEuro } from "@/lib/utils";
 
 type Detail = TripRow & { events: TripEventRow[]; attachments: AttachmentRow[]; claims: ClaimRow[] };
@@ -259,6 +259,8 @@ export default function TripPage() {
           onSaved={() => {
             flash("Gespeichert");
             load();
+            // the train position of a ticket check is looked up in the background
+            setTimeout(load, 8000);
           }}
         />
 
@@ -352,6 +354,7 @@ export default function TripPage() {
               )}
             </p>
           )}
+          <OnlineClaim t={t} onDone={load} flash={flash} />
           {t.claims.length > 0 && (
             <div className="mt-3 space-y-2 border-t border-border pt-3">
               {t.claims.map((c) => (
@@ -545,6 +548,35 @@ function ActualsControl({
   );
 }
 
+const signed = (n: number | null) => (n == null ? "" : n > 0 ? `+${n}` : n < 0 ? `${n}` : "pünktlich");
+
+/** Where the train was at a ticket check (live DB data at that moment). */
+function ControlContext({ c }: { c: NonNullable<TripEventRow["context"]> }) {
+  const where =
+    c.where === "between"
+      ? `zwischen ${c.from} und ${c.to}`
+      : c.where === "at"
+        ? `Halt in ${c.from}`
+        : c.where === "before"
+          ? `vor der Abfahrt in ${c.from}`
+          : c.where === "after"
+            ? `nach der Ankunft in ${c.from}`
+            : null;
+  const delay = c.delayMin != null ? `Zug ${signed(c.delayMin)}${c.delayMin !== 0 ? " min" : ""}` : null;
+  const next = c.where === "between" && c.nextDelayMin != null ? `an ${c.to} ${signed(c.nextDelayMin)}${c.nextDelayMin ? " min" : ""}` : null;
+  return (
+    <p className="text-muted-foreground">
+      {[c.train, where, delay, next].filter(Boolean).join(" · ")}
+      {c.note && ` ${c.note}`}
+      {c.outsideLeg && <span className="font-medium text-warning"> · außerhalb deines gebuchten Abschnitts</span>}
+      {c.gpsOk === true && <span className="text-success"> · Standort passt zum Zug</span>}
+      {c.gpsOk === false && (
+        <span className="font-medium text-warning"> · Standort {c.gpsKm} km von der Strecke – anderer Zug?</span>
+      )}
+    </p>
+  );
+}
+
 function EventLine({
   e,
   tripId,
@@ -568,10 +600,13 @@ function EventLine({
       ) : (
         <StickyNote className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
       )}
-      <p className="min-w-0 flex-1 break-words">
-        <span className="tabular-nums font-medium">{when}</span> {EVENT_LABEL[e.type] ?? e.type}
-        {e.text && <span className="text-muted-foreground"> – {e.text}</span>}
-      </p>
+      <div className="min-w-0 flex-1 break-words">
+        <p>
+          <span className="tabular-nums font-medium">{when}</span> {EVENT_LABEL[e.type] ?? e.type}
+          {e.text && <span className="text-muted-foreground"> – {e.text}</span>}
+        </p>
+        {e.context && <ControlContext c={e.context} />}
+      </div>
       <div className="flex shrink-0 items-center gap-2">
         {e.lat != null && e.lng != null ? (
           <a
@@ -842,6 +877,96 @@ function WhatHappened({ t, saved, onSave }: { t: Detail; saved: boolean; onSave:
         {busy ? <Spinner /> : saved ? "Gespeichert ✓" : "Speichern"}
       </Button>
     </Card>
+  );
+}
+
+const ONLINE_LABEL: Record<OnlineClaimType, string> = {
+  verspaetung: "Verspätung am Ziel",
+  "nicht-angetreten": "Reise nicht angetreten",
+  abgebrochen: "Fahrt unterwegs abgebrochen",
+};
+
+/** Submit through the DB customer account — shows exactly what goes out, sends only after confirmation. */
+function OnlineClaim({ t, onDone, flash }: { t: Detail; onDone: () => void; flash: (m: string, ok?: boolean) => void }) {
+  const [account, setAccount] = React.useState(false);
+  const [returnUnused, setReturnUnused] = React.useState<boolean | null>(null);
+  const [busy, setBusy] = React.useState(false);
+  const [err, setErr] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    fetch("/api/dbaccount")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setAccount(!!d?.user && !!d?.hasPassword))
+      .catch(() => {});
+  }, []);
+  const span = ticketSpan(t);
+  const type = onlineClaimType(t, span.arrival);
+  const sent = t.claims.some((c) => c.caseId || c.status !== "draft");
+  if (!account || !t.orderNumber || !type || sent) return null;
+  const asksReturn = t.roundTrip && t.direction !== "return" && type !== "verspaetung";
+  const fmt = (iso: string | null) =>
+    iso ? `${new Date(iso).toLocaleDateString("de-DE", { timeZone: "Europe/Berlin" })} ${formatTime(iso)}` : "–";
+  return (
+    <div className="mt-3 space-y-2 border-t border-border pt-3 text-sm">
+      <h3 className="font-medium">Online bei der DB einreichen</h3>
+      <ul className="space-y-0.5 text-xs text-muted-foreground">
+        <li>
+          Antrag: <b className="text-foreground">{ONLINE_LABEL[type]}</b> · {t.direction === "return" ? "Rückfahrt" : "Hinfahrt"} · Auftrag{" "}
+          {t.orderNumber}
+        </li>
+        <li>
+          {span.from} {fmt(span.departure)} → {span.to} {fmt(span.arrival)}
+        </li>
+        {type === "abgebrochen" && <li>Abgebrochen in {t.abortedAt}</li>}
+        {type === "verspaetung" && <li>Tatsächlich angekommen {fmt(t.actualArrival)}</li>}
+        <li>Persönliche Daten und Auszahlung aus den Einstellungen · Bestätigung per E-Mail</li>
+      </ul>
+      {asksReturn && (
+        <div className="flex flex-wrap gap-3 text-sm">
+          <span className="text-xs text-muted-foreground">Rückfahrt:</span>
+          <label className="flex items-center gap-1.5">
+            <input type="radio" checked={returnUnused === false} onChange={() => setReturnUnused(false)} /> wird/wurde genutzt
+          </label>
+          <label className="flex items-center gap-1.5">
+            <input type="radio" checked={returnUnused === true} onChange={() => setReturnUnused(true)} /> nicht genutzt
+          </label>
+        </div>
+      )}
+      <Button
+        size="sm"
+        disabled={busy || (asksReturn && returnUnused == null)}
+        onClick={async () => {
+          if (!confirm("Antrag jetzt verbindlich bei der DB einreichen?")) return;
+          setBusy(true);
+          setErr(null);
+          try {
+            const res = await fetch(`/api/trips/${t.id}/claim/online`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ confirm: true, ...(asksReturn ? { returnUnused } : {}) }),
+            });
+            const d = await res.json().catch(() => ({}));
+            if (!res.ok) setErr(d.error ?? "Einreichen fehlgeschlagen");
+            else {
+              flash(`Eingereicht – Fall-ID ${d.claim?.caseId ?? "?"}`);
+              onDone();
+            }
+          } catch {
+            setErr("Keine Verbindung");
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        {busy ? (
+          <>
+            <Spinner /> Meldet bei der DB an … (bis zu 1 Min.)
+          </>
+        ) : (
+          "Online einreichen"
+        )}
+      </Button>
+      {err && <p className="text-sm text-danger">{err}</p>}
+    </div>
   );
 }
 

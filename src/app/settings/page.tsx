@@ -5,6 +5,7 @@ import { Check, ChevronDown, ChevronUp, Plus, Trash2 } from "lucide-react";
 import { AppHeader } from "@/components/AppHeader";
 import { ClaimantCard } from "@/components/ClaimantCard";
 import { DelayDataCard } from "@/components/DelayDataCard";
+import { DbAccountCard } from "@/components/DbAccountCard";
 import { MailSyncCard } from "@/components/MailSyncCard";
 import { Badge, Button, Card, Input, Spinner, Switch } from "@/components/ui";
 import { formatAgo } from "@/lib/time";
@@ -103,6 +104,7 @@ export default function SettingsPage() {
         <ClaimantCard />
 
         <MailSyncCard />
+        <DbAccountCard />
 
 
         {/* Default route */}

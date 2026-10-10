@@ -176,11 +176,13 @@ export function legAt(legs: TripLeg[], at: number): number | null {
   let prevArrival = -Infinity;
   for (const [i, l] of legs.entries()) {
     if (l.isWalking || !l.plannedDeparture) continue;
-    const dep = new Date(l.plannedDeparture).getTime();
+    // Actual times where known: a late train is still "the" train after its planned arrival.
+    const dep = new Date(l.rt?.dep ?? l.plannedDeparture).getTime();
     // Boarding window of 5 min — but not while the previous train is still running.
     const from = Math.max(dep - 5 * 60_000, prevArrival);
     if (at >= from) idx = i;
-    if (l.plannedArrival) prevArrival = new Date(l.plannedArrival).getTime();
+    const arr = l.rt?.arr ?? l.plannedArrival;
+    if (arr) prevArrival = new Date(arr).getTime();
   }
   return idx;
 }
@@ -202,6 +204,7 @@ export function addEvent(
     accuracy: e.accuracy ?? null,
     legIndex: e.legIndex ?? legAt(t.legs, at),
     text: e.text ?? null,
+    context: null,
     createdAt: now(),
   };
   db.insert(tripEvents).values(row).run();
@@ -220,8 +223,14 @@ export function updateEvent(
     const t = db.select().from(trips).where(eq(trips.id, e.tripId)).get();
     if (t) set.legIndex = legAt(t.legs, set.at);
   }
+  // Time or place changed → the train position found for the old values no longer applies.
+  if (set.at !== undefined || set.lat !== undefined || set.lng !== undefined) set.context = null;
   db.update(tripEvents).set(set).where(eq(tripEvents.id, id)).run();
   return db.select().from(tripEvents).where(eq(tripEvents.id, id)).get() ?? null;
+}
+
+export function setEventContext(id: string, context: TripEventRow["context"]): void {
+  db.update(tripEvents).set({ context }).where(eq(tripEvents.id, id)).run();
 }
 
 export function deleteEvent(id: string): void {

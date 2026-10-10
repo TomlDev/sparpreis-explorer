@@ -643,6 +643,8 @@ export const tripEvents = sqliteTable(
     accuracy: real("accuracy"),
     legIndex: integer("leg_index"),
     text: text("text"),
+    /** Where the train was at that moment (live DB data), filled in after a ticket check. */
+    context: text("context", { mode: "json" }).$type<EventContext>(),
     createdAt: integer("created_at").notNull(),
   },
   (t) => ({ byTrip: index("trip_events_trip_idx").on(t.tripId, t.at) }),
@@ -709,3 +711,23 @@ export type ProfileStationRow = typeof profileStations.$inferSelect;
 export type CandidatePatternRow = typeof candidatePatterns.$inferSelect;
 export type HubScoreRow = typeof hubScores.$inferSelect;
 export type FavoriteRow = typeof favorites.$inferSelect;
+
+/** Position of the train at a ticket check (from DB's live run of that train). */
+export interface EventContext {
+  train: string | null;
+  /** "between" two stops, standing "at" one, not yet departed / already arrived. */
+  where: "between" | "at" | "before" | "after" | null;
+  from: string | null;
+  to: string | null;
+  /** Delay when leaving the last stop / expected at the next one (minutes). */
+  delayMin: number | null;
+  nextDelayMin: number | null;
+  /** Outside the booked part of this train (stops before boarding / after alighting). */
+  outsideLeg: boolean;
+  /** GPS vs. the train's track between those stops. */
+  gpsKm: number | null;
+  gpsOk: boolean | null;
+  note: string | null;
+  checkedAt: number;
+}
+

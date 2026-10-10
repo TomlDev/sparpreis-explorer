@@ -170,3 +170,18 @@ export function liveHints(expectedDelayMin: number | null): string[] {
     out.push("≥ 60 min erwartet: Entschädigung möglich, oder Fahrt abbrechen/nicht antreten und Fahrpreis zurück.");
   return out;
 }
+
+/** Claim types of DB's online form (Fahrgastrechte über das Kundenkonto). */
+export type OnlineClaimType = "verspaetung" | "nicht-angetreten" | "abgebrochen";
+
+/** Which online claim fits the trip as recorded — null when DB pays nothing for it. */
+export function onlineClaimType(t: { status: string; actualArrival: string | null; expectedDelayMin: number | null; abortedAt: string | null }, plannedArrival: string | null): OnlineClaimType | null {
+  if (t.status === "delayed" || t.status === "done") {
+    const late = arrivalDelayMin(plannedArrival, t.actualArrival);
+    return late != null && late >= 60 ? "verspaetung" : null;
+  }
+  if (t.status === "cancelled") return "nicht-angetreten";
+  if (t.status === "not_started") return (t.expectedDelayMin ?? 0) >= 60 ? "nicht-angetreten" : null;
+  if (t.status === "aborted") return t.abortedAt && (t.expectedDelayMin ?? 0) >= 60 ? "abgebrochen" : null;
+  return null;
+}

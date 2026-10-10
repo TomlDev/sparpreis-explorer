@@ -3,7 +3,7 @@ import { db } from "@/db/client";
 import { trips, type LegRealtime, type TripLeg, type TripRow } from "@/db/schema";
 import { DB_DAILY_CAP } from "@/lib/config";
 import { getPricingProvider } from "@/lib/rail/provider";
-import type { NormDeparture, NormStopover } from "@/lib/rail/types";
+import type { NormDeparture, NormStopover, NormTrip } from "@/lib/rail/types";
 import { addDbUsageToday, dbUsageToday } from "@/lib/repo/settings";
 import { todayLocal } from "@/lib/time";
 import { updateTrip } from "./repo";
@@ -76,7 +76,8 @@ export function findStop(stops: NormStopover[], name: string, planned: string | 
   return stops.find((s) => ms(kind === "dep" ? s.plannedDeparture : s.plannedArrival) === p) ?? null;
 }
 
-async function liveRt(leg: TripLeg): Promise<LegRealtime | null> {
+/** The leg's train with its whole run (realtime per stop) — board lookup only the first time. */
+export async function trainRun(leg: TripLeg): Promise<{ tripId: string; run: NormTrip } | null> {
   const provider = getPricingProvider();
   if (!provider?.getTrip || !provider.getDepartures) return null;
   const spend = () => {
@@ -97,7 +98,13 @@ async function liveRt(leg: TripLeg): Promise<LegRealtime | null> {
     if (!tripId) return null;
   }
   spend();
-  const run = await provider.getTrip(tripId);
+  return { tripId, run: await provider.getTrip(tripId) };
+}
+
+async function liveRt(leg: TripLeg): Promise<LegRealtime | null> {
+  const found = await trainRun(leg);
+  if (!found) return null;
+  const { tripId, run } = found;
   const from = findStop(run.stops, leg.fromName, leg.plannedDeparture, "dep");
   const to = findStop(run.stops, leg.toName, leg.plannedArrival, "arr");
   if (!from && !to) return null;

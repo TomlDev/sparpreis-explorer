@@ -21,6 +21,8 @@ export interface NormStopover {
   arrival?: string | null;
   departure?: string | null;
   cancelled?: boolean;
+  lat?: number | null;
+  lng?: number | null;
 }
 
 export interface NormLeg {

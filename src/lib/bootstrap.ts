@@ -7,6 +7,7 @@ import { pruneCache } from "@/lib/cache/cache";
 import { startMailPolling } from "@/lib/trips/mailSync";
 import { startActualsPolling } from "@/lib/trips/actuals";
 import { startLivePolling } from "@/lib/trips/live";
+import { startDbSyncPolling } from "@/lib/trips/dbSync";
 
 let ready = false;
 let pruneStarted = false;
@@ -41,6 +42,7 @@ export function ensureReady(): void {
     startMailPolling();
     startActualsPolling();
     startLivePolling();
+    startDbSyncPolling();
   }
   ready = true;
 }

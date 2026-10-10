@@ -56,7 +56,11 @@ export function TodayBanner() {
     try {
       const r = await logControl(id);
       flash(r.ok ? `Kontrolle gespeichert${r.withLocation ? " (mit Standort)" : " (ohne Standort)"}` : "Speichern fehlgeschlagen", r.ok);
-      if (r.ok) changed();
+      if (r.ok) {
+        changed();
+        // where the train was is looked up in the background — show it when it's there
+        setTimeout(changed, 8000);
+      }
     } catch {
       flash("Keine Verbindung – Kontrolle nicht gespeichert. Später auf der Fahrtseite nachtragen.", false);
     } finally {

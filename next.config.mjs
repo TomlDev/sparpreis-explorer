@@ -36,7 +36,7 @@ const nextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
   // better-sqlite3 and db-vendo-client are server-only native/CJS deps.
-  serverExternalPackages: ["better-sqlite3", "db-vendo-client", "mailparser", "unpdf", "imapflow", "mailauth"],
+  serverExternalPackages: ["better-sqlite3", "db-vendo-client", "mailparser", "unpdf", "imapflow", "mailauth", "playwright", "playwright-core"],
   // Screenshot/receipt uploads pass the auth proxy, which buffers bodies (default 10 MB).
   experimental: { proxyClientMaxBodySize: "25mb" },
   async headers() {

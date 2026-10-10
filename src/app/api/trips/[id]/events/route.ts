@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { ensureReady } from "@/lib/bootstrap";
+import { checkControl } from "@/lib/trips/controlCheck";
 import { addEvent, deleteEvent, updateEvent } from "@/lib/trips/repo";
 
 export const runtime = "nodejs";
@@ -28,6 +29,8 @@ export async function POST(req: Request, { params }: Ctx) {
       legIndex: num(b.legIndex),
       text: typeof b.text === "string" ? b.text.slice(0, 2000) : null,
     });
+    // Where was the train? Looked up in the background — the check-in itself stays instant.
+    if (event.type === "control") void checkControl(event).catch((e) => console.error("[control]", (e as Error).message));
     return NextResponse.json({ event });
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 400 });
@@ -56,5 +59,6 @@ export async function PATCH(req: Request) {
     accuracy: opt(b.accuracy),
     text: b.text === null ? null : typeof b.text === "string" ? b.text.slice(0, 2000) : undefined,
   });
+  if (event?.type === "control" && event.context == null) void checkControl(event).catch((e) => console.error("[control]", (e as Error).message));
   return event ? NextResponse.json({ event }) : NextResponse.json({ error: "nicht gefunden" }, { status: 404 });
 }

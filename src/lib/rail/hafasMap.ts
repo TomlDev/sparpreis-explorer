@@ -41,7 +41,7 @@ export function mapLocation(l: unknown): NormLocation | null {
 
 export function mapStopover(so: unknown): NormStopover {
   const o = so as {
-    stop?: { id?: string; name?: string };
+    stop?: { id?: string; name?: string; location?: { latitude?: number; longitude?: number } };
     plannedArrival?: string;
     plannedDeparture?: string;
     arrival?: string;
@@ -56,6 +56,8 @@ export function mapStopover(so: unknown): NormStopover {
     arrival: o.arrival ?? null,
     departure: o.departure ?? null,
     cancelled: o.cancelled === true,
+    lat: o.stop?.location?.latitude ?? null,
+    lng: o.stop?.location?.longitude ?? null,
   };
 }
 
