@@ -128,7 +128,31 @@ interface Agg {
   samples: number; // observations (weekday-weighted, not age-weighted)
 }
 
-function aggregate(rows: StatRow[], side: "arr" | "dep", ctx: ReliabilityContext, dow: DowGroup): Agg | null {
+/**
+ * Months that look like planned construction work rather than unreliability:
+ * trains that didn't run at all show up as "cancelled". A month counts when
+ * ≥ 15 % of the trains fell out and at least 3× as many as in the quietest
+ * other month (e.g. Wuppertal-Vohwinkel: Jun 58 %, Jul 19 %, Aug 6 %).
+ */
+export function constructionMonths(rows: StatRow[]): Set<string> {
+  const per = new Map<string, { n: number; c: number }>();
+  for (const r of rows) {
+    const x = per.get(r.month) ?? { n: 0, c: 0 };
+    x.n += r.n;
+    x.c += r.cancelled;
+    per.set(r.month, x);
+  }
+  const rate = new Map([...per].filter(([, v]) => v.n >= 20).map(([m, v]) => [m, v.c / v.n]));
+  const out = new Set<string>();
+  for (const [m, r] of rate) {
+    const others = [...rate].filter(([k]) => k !== m).map(([, v]) => v);
+    if (!others.length) continue;
+    if (r >= 0.15 && r >= 3 * Math.max(Math.min(...others), 0.02)) out.add(m);
+  }
+  return out;
+}
+
+function aggregate(rows: StatRow[], side: "arr" | "dep", ctx: ReliabilityContext, dow: DowGroup, building = new Set<string>()): Agg | null {
   if (!rows.length) return null;
   const newest = ctx.months.reduce((a, b) => (b > a ? b : a), ctx.months[0] ?? rows[0].month);
   const acc = new Map<number, number>();
@@ -143,9 +167,11 @@ function aggregate(rows: StatRow[], side: "arr" | "dep", ctx: ReliabilityContext
       acc.set(bin, (acc.get(bin) ?? 0) + count * w);
       mass += count * w;
     }
-    total += r.n * w;
-    cancelled += r.cancelled * w;
-    samples += r.n * wd;
+    // construction month: the trains that ran count, the ones that didn't run don't
+    const ran = building.has(r.month) ? r.n - r.cancelled : r.n;
+    total += ran * w;
+    cancelled += building.has(r.month) ? 0 : r.cancelled * w;
+    samples += ran * wd;
   }
   if (mass <= 0) return null;
   const dist: Dist = [...acc.entries()].sort((a, b) => a[0] - b[0]).map(([b, v]) => [b, v / mass]);
@@ -225,11 +251,14 @@ export function computeReliability(
     if (!eva) return null;
     const { number, line } = trainKey(leg);
     const hour = Number(formatTime(which === "dep" ? leg.plannedDeparture : leg.plannedArrival).slice(0, 2));
+    const stationRows = src.rows("station", eva, "");
+    const lineRows = line ? src.rows("line", eva, line) : [];
+    const building = new Set([...constructionMonths(stationRows), ...constructionMonths(lineRows)]);
     const chain: [StatLevel, Agg | null][] = [
-      ["train", number ? aggregate(src.rows("train", eva, number), which, ctx, dow) : null],
-      ["line_hour", line && Number.isFinite(hour) ? aggregate(src.rows("line_hour", eva, `${line}|${hour}`), which, ctx, dow) : null],
-      ["line", line ? aggregate(src.rows("line", eva, line), which, ctx, dow) : null],
-      ["station", aggregate(src.rows("station", eva, ""), which, ctx, dow)],
+      ["train", number ? aggregate(src.rows("train", eva, number), which, ctx, dow, building) : null],
+      ["line_hour", line && Number.isFinite(hour) ? aggregate(src.rows("line_hour", eva, `${line}|${hour}`), which, ctx, dow, building) : null],
+      ["line", line ? aggregate(lineRows, which, ctx, dow, building) : null],
+      ["station", aggregate(stationRows, which, ctx, dow, building)],
     ];
     return blend(chain, K);
   };
@@ -255,6 +284,7 @@ export function computeReliability(
   let basisRank = 0;
   let samples = Infinity;
   let pNoCancel = 1;
+  const cancelOf = new Map<number, number>();
   for (const { l, i } of rail) {
     const dep = side(l, "dep");
     const arr = side(l, "arr");
@@ -272,6 +302,7 @@ export function computeReliability(
     basisRank = Math.max(basisRank, LEVEL_RANK[basis]);
     samples = Math.min(samples, s);
     pNoCancel *= 1 - cancel;
+    cancelOf.set(i, cancel);
     if (!dep || !arr) complete = false;
   }
   if (samples === Infinity) return null;
@@ -279,6 +310,25 @@ export function computeReliability(
   const last = rail[rail.length - 1];
   const lastArr = dists.get(last.i)?.arr ?? null;
   if (!lastArr) complete = false;
+
+  // Planned buffer of each train-to-train transfer (index into `rail` of the arriving train).
+  const buffers = new Map<number, number>();
+  for (let k = 0; k + 1 < rail.length; k++) {
+    const between = legs.slice(rail[k].i + 1, rail[k + 1].i);
+    if (between.some((l) => !l.isWalking)) continue;
+    const walk = between.reduce((s, l) => s + l.durationMin, 0);
+    buffers.set(k, minutesBetween(rail[k].l.plannedArrival, rail[k + 1].l.plannedDeparture) - walk);
+  }
+  /**
+   * A disruption from rail train `from` on (missed / cancelled → the next train
+   * ≈ `extra` minutes later): does it still make you ≥ 20 min late at the end?
+   * Not when a later transfer has room for it — you're back on your booked
+   * trains there (what counts is the delay at the destination).
+   */
+  const flexAfter = (from: number, extra: number): number => {
+    for (const [k, b] of buffers) if (k >= from && b >= extra + 5) return 0;
+    return lastArr ? tailProbability(lastArr.dist, FLEX_MINUTES - extra) : 1;
+  };
 
   const transfers: ReliabilityTransfer[] = [];
   let pConnections = 1;
@@ -299,13 +349,18 @@ export function computeReliability(
     transfers.push({ station: a.l.toName, afterLeg: a.i, bufferMin: buffer, missPct: round3(miss), headwayMin: h });
     pConnections *= 1 - miss;
     // After a miss you take the next train of that line ≈ one headway later.
-    const flexIfMiss = lastArr ? tailProbability(lastArr.dist, FLEX_MINUTES - (h ?? 60)) : 1;
-    pNoFlexFromMisses *= 1 - miss * flexIfMiss;
+    pNoFlexFromMisses *= 1 - miss * flexAfter(k + 1, h ?? 60);
   }
+  // A cancelled train: the next one of its line ≈ one headway later (unknown: an hour).
+  let pNoFlexFromCancels = 1;
+  rail.forEach(({ l, i }, r) => {
+    const c = cancelOf.get(i) ?? 0;
+    if (c > 0) pNoFlexFromCancels *= 1 - c * flexAfter(r, headway(l) ?? 60);
+  });
 
   const late = lastArr ? tailProbability(lastArr.dist, FLEX_MINUTES) : 0;
   const ok = pNoCancel * pConnections;
-  const noFlex = pNoCancel * pNoFlexFromMisses * (1 - late);
+  const noFlex = pNoFlexFromCancels * pNoFlexFromMisses * (1 - late);
   const basis = (Object.keys(LEVEL_RANK) as StatLevel[]).find((l) => LEVEL_RANK[l] === basisRank)!;
   return {
     okPct: round3(ok),

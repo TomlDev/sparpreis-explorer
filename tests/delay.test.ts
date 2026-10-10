@@ -8,6 +8,7 @@ import { evaFromId, normStationKey, trainKey } from "@/lib/delay/normalize";
 import { planMonths } from "@/lib/delay/plan";
 import {
   computeReliability,
+  constructionMonths,
   dowGroup,
   missProbability,
   monthWeight,
@@ -181,6 +182,37 @@ describe("Anschluss- und Flex-Wahrscheinlichkeit", () => {
     const noIce = computeReliability(legs, { ...src, rows: (l, e, k) => (k === "101" ? [] : data[`${l}|${e}|${k}`] ?? []) }, ctx)!;
     expect(noIce.complete).toBe(false);
     expect(noIce.transfers).toHaveLength(0);
+  });
+
+  it("erkennt Bauphasen-Monate (Züge fuhren nicht) und zählt deren Ausfälle nicht", () => {
+    const m = (month: string, n: number, cancelled: number): StatRow => ({ month, dow: "wk", n, cancelled, arr: [], dep: [] });
+    // Wuppertal-Vohwinkel: Jun 58 %, Jul 19 %, Aug 6 %
+    expect([...constructionMonths([m("2026-06", 100, 58), m("2026-07", 100, 19), m("2026-08", 100, 6)])].sort()).toEqual(["2026-06", "2026-07"]);
+    // Mainz: always 3–6 % → nothing
+    expect(constructionMonths([m("2026-06", 100, 5), m("2026-07", 100, 6), m("2026-08", 100, 3)]).size).toBe(0);
+    // a train seen only in a construction month: its cancellations don't count
+    const build: Record<string, StatRow[]> = {
+      ...data,
+      "train|8000207|101": [{ ...row([[0, 30]], [], 100, 70), month: "2026-07" }],
+      "station|8000207|": [m("2026-07", 1000, 400), m("2026-08", 1000, 30)],
+    };
+    const rel = computeReliability(legs, { ...src, rows: (l, e, k) => build[`${l}|${e}|${k}`] ?? [] }, { ...ctx, months: ["2026-07", "2026-08"] })!;
+    expect(rel.cancelPct).toBe(0);
+  });
+
+  it("ein verpasster Anschluss zählt nicht als Flex, wenn ein späterer Umstieg genug Puffer hat", () => {
+    // RE → ICE (4 min, 20 % verpasst) … dann 2 h Aufenthalt in Köln → IC
+    const ic: LegLike = { product: "national", lineName: "IC 2000", trainNumber: "2000", fromId: "8000207", toId: "8000105", fromName: "Köln Hbf", toName: "Frankfurt(Main)Hbf", plannedDeparture: `${T}T10:00:00+02:00`, plannedArrival: `${T}T11:00:00+02:00`, durationMin: 60, isWalking: false };
+    const more: Record<string, StatRow[]> = {
+      ...data,
+      "train|8000207|101": [row([[0, 100]], [])],
+      "train|8000207|2000": [row([], [[0, 100]])],
+      "train|8000105|2000": [row([[0, 100]], [])],
+    };
+    const rel = computeReliability([...legs, ic], { ...src, rows: (l, e, k) => more[`${l}|${e}|${k}`] ?? [] }, ctx)!;
+    expect(rel.transfers[0].missPct).toBeCloseTo(0.2);
+    expect(rel.okPct).toBeCloseTo(0.8, 2); // the connection does break …
+    expect(rel.flexPct).toBeCloseTo(0, 2); // … but you're back on plan in Köln
   });
 
   it("wertet Bus zwischen zwei Zügen nicht als Umstieg", () => {
