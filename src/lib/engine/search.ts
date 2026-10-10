@@ -7,7 +7,7 @@ import { addAttemptedVias, addDbUsageToday, dbUsageToday, getAttemptedVias, getP
 import { isLongDistanceProduct } from "@/lib/domain/products";
 import { resolveRichId, searchProforma } from "@/lib/rail/proforma";
 import { rankResults } from "@/lib/domain/ranking";
-import { buildResult, isOriginalKind, type SearchResult } from "@/lib/domain/result";
+import { buildResult, isOriginalKind, type PriceHow, type SearchResult } from "@/lib/domain/result";
 import { normStationName } from "@/lib/domain/ticketCoverage";
 import {
   getPricingProvider,
@@ -338,8 +338,10 @@ export async function runSearch(params: SearchParams, opts: RunOptions): Promise
     source: SearchResult["source"],
     expected?: { fromName?: string; toName?: string },
     resultKind: SearchResult["resultKind"] = "alternative",
+    priceHow?: PriceHow,
   ): SearchResult | null => {
     if (!journey.legs.length) return null;
+    if (journey.price && priceHow) journey.price.how = priceHow;
     const result = buildResult(journey, {
       variant,
       variantLabel,
@@ -469,7 +471,7 @@ export async function runSearch(params: SearchParams, opts: RunOptions): Promise
         });
         for (const j of res.journeys) {
           setAnchor(j.price?.amount);
-          ingest(j, "primary", primaryOrigin.label, "candidate", expected, "normal");
+          ingest(j, "primary", primaryOrigin.label, "candidate", expected, "normal", "plain");
         }
         dlog("search", `normal journeys: ${res.journeys.length}, reference≈${anchorPrice ?? "–"}€`);
       } catch (err) {
@@ -507,7 +509,7 @@ export async function runSearch(params: SearchParams, opts: RunOptions): Promise
         });
         // Low-FV connections are bookable DB journeys, but from a constructed
         // search (ICE excluded) — no "Pro-Forma" badge, yet not a DB original.
-        for (const j of res.journeys) ingest(j, "primary", primaryOrigin.label, "candidate", expected, "alternative");
+        for (const j of res.journeys) ingest(j, "primary", primaryOrigin.label, "candidate", expected, "alternative", "lowfv");
         dlog("search", `low-FV journeys: ${res.journeys.length}`);
       } catch {
         /* best effort */
@@ -585,7 +587,7 @@ export async function runSearch(params: SearchParams, opts: RunOptions): Promise
               if (!j.legs.some((l) => !l.isWalking && isLongDistanceProduct(l.product))) continue;
               // Via-forced routing → bookable DB connection, but not what DB
               // proposes for a plain search: no badge, not "original".
-              ingest(j, "primary", primaryOrigin.label, "candidate", expected, "alternative");
+              ingest(j, "primary", primaryOrigin.label, "candidate", expected, "alternative", "via");
               const p = j.price?.amount;
               if (typeof p === "number") {
                 observedPrice = observedPrice == null ? p : Math.min(observedPrice, p);
@@ -668,10 +670,12 @@ export async function runSearch(params: SearchParams, opts: RunOptions): Promise
               fvAbschnitt: shape.fvAbschnitt,
               ...timeOpt,
               klasse: prefs.klasse,
+              bahncard: prefs.bahncard,
+              deutschlandTicket: prefs.deutschlandTicket,
             });
             for (const j of js) {
               if (!j.legs.some((l) => !l.isWalking && isLongDistanceProduct(l.product))) continue;
-              ingest(j, "primary", primaryOrigin.label, "candidate", expected, "proforma");
+              ingest(j, "primary", primaryOrigin.label, "candidate", expected, "proforma", "proforma");
             }
           } catch {
             /* best effort — Akamai/422 handled in the provider */
@@ -741,10 +745,12 @@ export async function runSearch(params: SearchParams, opts: RunOptions): Promise
             fvAbschnitt: 1,
             departure,
             klasse: prefs.klasse,
+            bahncard: prefs.bahncard,
+            deutschlandTicket: prefs.deutschlandTicket,
           });
           for (const j of js) {
             if (!j.legs.some((l) => !l.isWalking && isLongDistanceProduct(l.product))) continue;
-            ingest(j, "primary", primaryOrigin.label, "candidate", expected, "proforma");
+            ingest(j, "primary", primaryOrigin.label, "candidate", expected, "proforma", "proforma");
           }
         } catch {
           /* best effort */

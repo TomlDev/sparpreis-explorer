@@ -1,4 +1,5 @@
 import { userAgent } from "@/lib/config";
+import { mapBahncard } from "./dbVendo";
 import { dlog } from "@/lib/log";
 import { callImpersonate, makeImpersonatingRequest } from "./impersonate";
 import { mapJourney } from "./hafasMap";
@@ -135,6 +136,9 @@ export interface ProformaOptions {
   /** Search "arrive by" instead of "depart at" (takes precedence over departure). */
   arrival?: Date;
   klasse?: 1 | 2;
+  /** "BC25" / "BC50" / "BC100" — without it DB prices the full fare (not comparable to the other results). */
+  bahncard?: string | null;
+  deutschlandTicket?: boolean;
   results?: number;
 }
 
@@ -179,6 +183,9 @@ export async function searchProforma(opts: ProformaOptions): Promise<NormJourney
   if (opts.arrival) opt.arrival = opts.arrival;
   else if (opts.departure) opt.departure = opts.departure;
   if (opts.klasse) opt.firstClass = opts.klasse === 1;
+  const loyaltyCard = mapBahncard(opts.bahncard ?? null, opts.klasse ?? 2);
+  if (loyaltyCard) opt.loyaltyCard = loyaltyCard;
+  if (opts.deutschlandTicket) opt.deutschlandTicketDiscount = true;
 
   // Akamai occasionally 403s the web endpoint from the datacenter — retry.
   return limiter.schedule(async () => {

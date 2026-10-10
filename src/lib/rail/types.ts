@@ -46,6 +46,8 @@ export interface NormPrice {
   currency: string;
   /** true when the offer is known to cover the full requested O→D. */
   fullRoute?: boolean;
+  /** Which search produced this price (to rebuild it on bahn.de). */
+  how?: "plain" | "lowfv" | "via" | "proforma";
   hint?: string | null;
 }
 

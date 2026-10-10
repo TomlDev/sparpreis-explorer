@@ -16,7 +16,6 @@ import {
   XCircle,
 } from "lucide-react";
 import type { SearchResult } from "@/lib/domain/result";
-import { bahnDeLink } from "@/lib/dbLink";
 import { waitClass, walkWait } from "@/lib/domain/transferWait";
 import { formatTime } from "@/lib/time";
 import { cn, formatDuration, formatEuro } from "@/lib/utils";
@@ -85,7 +84,6 @@ export function ResultCard({
   referencePrice,
   isReference,
   onSetReference,
-  stationIds,
   open: openProp,
   onOpenChange,
 }: {
@@ -96,7 +94,6 @@ export function ResultCard({
   referencePrice?: number | null;
   isReference?: boolean;
   onSetReference?: () => void;
-  stationIds?: Record<string, { soid: string; soei: string }>;
   /** Controlled expand state (e.g. mirrored into the URL); local if omitted. */
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
@@ -198,10 +195,17 @@ export function ResultCard({
     if (res.ok) setBookedId((await res.json()).trip.id);
   }
 
-  const dbHref = bahnDeLink(m.originName, m.destinationName, m.plannedDeparture, {
-    origin: stationIds?.[m.originName],
-    dest: stationIds?.[m.destinationName],
-  });
+  // Always via the app: it knows the BahnCard / class, resolves the bahn.de ids (also for
+  // results from the cache) and rebuilds the search that produced the shown price.
+  const how = r.priceHow ?? (r.resultKind === "proforma" ? "proforma" : r.resultKind === "alternative" ? "via" : "plain");
+  const withFv = (how === "proforma" || how === "via") && r.metrics.fvLegs === 1 && r.headlineFv;
+  const dbHref = `/api/dblink?${new URLSearchParams({
+    from: m.originName,
+    to: m.destinationName,
+    ...(m.plannedDeparture ? { dep: m.plannedDeparture } : {}),
+    ...(how !== "plain" ? { kind: how } : {}),
+    ...(withFv ? { fvFrom: r.headlineFv!.fromName, fvTo: r.headlineFv!.toName } : {}),
+  })}`;
 
   return (
     <Card

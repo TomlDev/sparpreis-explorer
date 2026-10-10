@@ -2,7 +2,7 @@ import type { ClaimRow, TripRow } from "@/db/schema";
 import { DbLoginError, withDbSession, type DbOrder, type DbOrderDetail } from "./dbBrowser";
 import { getProfile, ibanValid, type ClaimantProfile } from "./profile";
 import { getTrip, saveClaim } from "./repo";
-import { arrivalDelayMin, onlineClaimType, ticketSpan, type OnlineClaimType } from "./rules";
+import { arrivalDelayMin, assess, onlineClaimType, ticketSpan, type OnlineClaimType } from "./rules";
 
 export { onlineClaimType, type OnlineClaimType };
 
@@ -168,7 +168,19 @@ export async function submitClaimOnline(tripId: string, opts: { returnUnused?: b
   });
 
   const draft = trip.claims.find((c) => c.status === "draft" && !c.caseId);
+  // What the app expects DB to pay (same rules as for the paper form).
+  const ent = assess({
+    status: trip.status,
+    price: trip.price,
+    plannedArrival: span.arrival,
+    actualArrival: trip.actualArrival,
+    expectedDelayMin: trip.expectedDelayMin,
+    returnedToStart: trip.returnedToStart,
+    roundTrip: trip.roundTrip,
+    directionPrice: trip.ticket?.directionPrice ?? null,
+  });
   return saveClaim(trip.id, {
+    amount: ent?.amount ?? null,
     id: draft?.id,
     type: type === "verspaetung" ? "delay" : type === "nicht-angetreten" ? "not_started" : "aborted_return",
     status: "submitted",

@@ -153,6 +153,7 @@ export function loadJourney(fp: string): NormJourney | null {
             currency: offer.currency,
             fullRoute: offer.isFullRoute,
             hint: null,
+            how: (offer.raw as { how?: "plain" | "lowfv" | "via" | "proforma" } | null)?.how,
           }
         : null,
     ticketInfo:

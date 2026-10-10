@@ -739,7 +739,6 @@ function Home() {
               referencePrice={effectiveReference}
               isReference={r.fingerprint === referenceFp}
               onSetReference={() => chooseReference(r.fingerprint, r.coverage.price ?? null)}
-              stationIds={state.meta?.stationIds}
               open={openCards.has(r.fingerprint)}
               onOpenChange={(o) => setCardOpen(r.fingerprint, o)}
             />

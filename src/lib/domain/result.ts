@@ -7,6 +7,8 @@ import { legChainLabel, isLongDistanceLeg, legStopCount, productLabel } from "./
 import { assessCoverage, type CoverageResult } from "./ticketCoverage";
 
 export type ResultKind = "anchor" | "normal" | "alternative" | "proforma";
+/** Search that produced the shown price: plain O→D, without ICE, forced Zwischenhalte, per-Abschnitt pro-forma. */
+export type PriceHow = "plain" | "lowfv" | "via" | "proforma";
 
 /** "Original" = what DB itself proposes for a plain Start→Ziel search. */
 export function isOriginalKind(k: string | null | undefined): boolean {
@@ -62,6 +64,8 @@ export interface SearchResult {
    *  suggestions), alternative = DB journey from a constructed search (low-FV,
    *  via-forced, MOTIS route), proforma = per-Abschnitt / leave-earlier trick. */
   resultKind: ResultKind;
+  /** How the shown price was found — the kind alone can be "normal" for a pro-forma price. */
+  priceHow?: PriceHow | null;
   /** € cheaper than the day's anchor/best price (positive = cheaper). */
   savingsVsAnchor: number | null;
   /** true when a pro-forma candidate actually beats the anchor. */
@@ -150,6 +154,7 @@ export function buildResult(
     score: 0, // filled by ranking
     source: ctx.source ?? "live",
     resultKind: ctx.resultKind ?? "normal",
+    priceHow: journey.price?.how ?? null,
     savingsVsAnchor: null, // annotated by the engine once the anchor is known
     isProformaWin: false,
   };

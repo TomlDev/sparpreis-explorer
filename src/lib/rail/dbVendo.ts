@@ -98,7 +98,7 @@ async function getClient() {
 /** Map a BahnCard string (e.g. "BC25", "50", "BC100") to db-vendo-client's
  *  loyaltyCard opt. The profile compares the card type by Symbol.toString(),
  *  so a locally-constructed Symbol('Bahncard') matches. */
-function mapBahncard(
+export function mapBahncard(
   bahncard: string | null,
   klasse: 1 | 2,
 ): { type: symbol; discount: number; class: 1 | 2 } | undefined {
