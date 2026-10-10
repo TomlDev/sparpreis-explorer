@@ -49,7 +49,13 @@ So entstehen die Zahlen:
   Zugs und damit, wie pünktlich der Anschlusszug selbst abfährt. Auch der Takt zählt: Bei
   einer Linie, die alle 10 min fährt, kostet ein verpasster Anschluss kaum Zeit.
 - **Die Flex-Chance** setzt sich aus verpassten Anschlüssen, Zugausfällen und der Verspätung
-  des letzten Zugs zusammen.
+  des letzten Zugs zusammen. Maßgeblich ist immer die Verspätung am Ziel: Ein verpasster
+  Anschluss oder Ausfall zählt nur, wenn ihn kein späterer Umstieg mit genug Puffer wieder
+  auffängt (wer 3 h in Mannheim wartet, ist trotz verpasster S-Bahn pünktlich).
+- **Bauphasen zählen nicht als Ausfälle:** Fuhren an einem Bahnhof oder auf einer Linie in
+  einem Monat massenhaft Züge nicht (mindestens 15 % und mindestens dreimal so viele wie im
+  ruhigsten anderen Monat), war das meist eine Baustelle. Die „Ausfälle“ dieses Monats
+  werden ignoriert, die Verspätungen der Züge, die fuhren, zählen weiter.
 - **Die Datenbasis** ist so genau wie möglich: erst die Zugnummer, sonst die Linie zur selben
   Uhrzeit, dann die Linie, zuletzt der Bahnhof. Ältere Monate zählen weniger, dieselbe
   Jahreszeit und derselbe Wochentag können stärker gewichtet werden.
@@ -75,21 +81,45 @@ Flex-Verbindung“** einschalten und ein Datum wählen:
    DB-Schnittstellen, dauert ein paar Minuten).
 2. Sie nimmt nur Tickets mit **genau einem Fernverkehrs-Abschnitt**: das kurze ICE-Stück,
    das den Sparpreis möglich macht.
-3. Vorab wird ausgesiebt: **Min. Flex-Chance** und **Max. Anschluss-Quote** (beides im
-   Filter) bestimmen schon, welche Kandidaten überhaupt einen Preis abfragen.
+3. Vorab wird ausgesiebt: **Min. Flex**, **Max. Anschluss** und **Max. Preis** stehen direkt
+   in der Suche und bestimmen schon, welche Kandidaten überhaupt einen Preis abfragen.
 4. Das Ergebnis ist **nach Preis gruppiert**: je Preis eine Zeile pro Verbindung mit
    Anschluss- und Flex-Wert ganz vorne. Bei gleichem Preis steht die Verbindung zuerst, die
    eher platzt (niedrigere Anschluss-Quote, dann höhere Flex-Chance).
 5. Antippen öffnet die Details, **„Bei DB prüfen“** öffnet genau dieses Ticket auf bahn.de
    (mit Zwischenhalten und BahnCard), dort buchen.
 
-Gezeigt werden nur Züge des gesuchten Tages. Die Sortierung **🎯 Günstig & oft Flex** zeigt
+Gezeigt werden nur Züge des gesuchten Tages. Was gerade ausgeblendet ist, steht unter der
+Liste („12 ausgeblendet: 7 ohne Preis · 3 Ticket deckt nicht die ganze Strecke …“): Während
+der Suche fallen Treffer heraus, sobald sie einen Preis haben (dann die ohne Preis), sich als
+Teilticket entpuppen oder über eine Grenze rutschen. Die Sortierung **🎯 Günstig & oft Flex** zeigt
 außerdem nur die Verbindungen, die nicht von einer billigeren *und* flexibleren geschlagen
 werden; **🎲 Unzuverlässigste** sortiert rein nach Flex-Chance.
 
 **Früher aussteigen:** Suchst du ein Ziel, das unterwegs auf einer schon gesuchten Strecke
 liegt, zeigt die App passende Tickets aus diesen Suchen gleich mit, ohne neue Abfragen
 („🚪 Ticket bis X, du steigst in Y aus“). Fahrgastrechte zählen dabei am Ticketziel.
+
+## Am Reisetag: Prognose und Ersatzverbindung
+
+Gebucht ist ein günstiges Ticket mit hoher Flex-Chance, jetzt zählt der Tag selbst:
+
+- **Früh hinschauen:** Für Fahrten, die nicht auf „Nehme ich“ stehen, fragt die App ab 3 h
+  vor Abfahrt alle 15 min den Live-Stand *aller* Züge der Verbindung ab (nach der ersten
+  Suche eine Anfrage pro Zug). Jeder Zug wird außerdem ab 1 h vor seiner Abfahrt am
+  *Startbahnhof* verfolgt, nicht erst kurz vor deinem Einstieg.
+- **Prognose:** Verspätung am Ticketziel, platzende Anschlüsse, Ausfälle – oben in der
+  Heute-Leiste und auf der Fahrt-Seite.
+- **Platzt ein Anschluss, entscheidet der schnellste Ersatz:** Die Zugbindung entfällt nur,
+  wenn du am Ziel ≥ 20 min später bist. Deshalb sucht die App im DB-Live-Fahrplan die
+  schnellste Weiterfahrt ab dem Bruchpunkt und prüft sie alle 10 min neu: „Anschluss in
+  Mannheim platzt – Ersatz kommt +12 min an, Zugbindung bleibt“ oder eben „aufgehoben“.
+  Jedes Ergebnis landet mit Uhrzeit als **Beleg** an der Fahrt.
+- **Ersatzverbindung wählen:** Ist die Zugbindung weg, zeigt die Fahrt-Seite die nächsten
+  Verbindungen ab dem Start (unterwegs ab dem Bruchpunkt) mit Echtzeit, Anschluss-Quote und
+  Flex-Chance. Ein Tipp auf **„Nehme ich“** trägt sie als verknüpfte Ersatzfahrt ein; die
+  Live-Verfolgung läuft dort weiter. Kommt auch die Ersatzfahrt ≥ 60 min zu spät, gibt es
+  dafür die Entschädigung.
 
 ## Was die App sonst kann
 
@@ -113,9 +143,18 @@ liegt, zeigt die App passende Tickets aus diesen Suchen gleich mit, ohne neue Ab
 - **Kalender mit all deinen Fahrten:** aus der Suche per „Gebucht“, von Hand, automatisch aus
   den Buchungsmails (IMAP) oder aus deinem **DB-Kundenkonto** (inklusive Preis je Richtung
   bei Hin- und Rückfahrt).
-- **Echte Zeiten jeder Fahrt:** Die App verfolgt deine Züge am Reisetag live (ab Abfahrt
-  alle 10 min) und ergänzt später die offiziellen Ist-Zeiten aus den Open Data. Selbst
-  gemessene Werte bleiben immer erhalten, auch wenn die DB ihre Daten nachträglich ändert.
+- **Echte Zeiten jeder Fahrt:** Die App verfolgt deine Züge am Reisetag live (alle 10 min
+  und genau zur Abfahrt und Ankunft) und ergänzt später die offiziellen Ist-Zeiten aus den
+  Open Data. Selbst gemessene Werte bleiben immer erhalten, auch wenn die DB ihre Daten
+  nachträglich ändert.
+- **Doppelt gebucht?** Zwei Fahrten am selben Tag in dieselbe Richtung werden erkannt; mit
+  „✓ Nehme ich“ / „✗ Nehme ich nicht“ markierst du, welche du fährst. Die andere ist
+  ausgegraut und taucht nicht als nächste Fahrt auf – außer ihre Zugbindung fällt weg, dann
+  ist ihr Ticket wieder frei.
+- **Mit dem Ticket später gefahren:** Ab 20 min angekündigter Verspätung darfst du laut DB
+  auch an einem anderen Tag fahren (bis zu einem Jahr später). Die gebuchte Fahrt wird dann
+  mit der tatsächlich gemachten verknüpft; Entschädigung gibt es pro Ticket nur einmal, für
+  die Verspätung der Ersatzfahrt.
 - **Heute-Leiste:** Hast du heute eine Fahrt, zeigt jede Seite oben, in welchem Zug du
   gerade sitzt und wie es weitergeht.
 - **„Kontrolliert“:** speichert Zeit und Standort einer Fahrkartenkontrolle und hält fest,
@@ -130,19 +169,22 @@ liegt, zeigt die App passende Tickets aus diesen Suchen gleich mit, ohne neue Ab
 ## So benutzt du sie
 
 1. **Einrichten:** Unter **Einstellungen** BahnCard und Klasse wählen, unter **Start & Ziele**
-   deine Orte mit ihren Haltestellen anlegen (pro Ort mehrere, z. B. ein Hauptbahnhof als
-   Ausweich-Start) und unter **Pünktlichkeit** die Daten laden. Fertig eingerichtete
+   deine Orte anlegen und ihre Haltestellen direkt aus der Haltestellensuche wählen (pro Ort
+   mehrere, z. B. ein Hauptbahnhof als Ausweich-Start) und unter **Pünktlichkeit** die Daten
+   laden. Fertig eingerichtete
    Bereiche klappen sich zu, offene Punkte sind markiert.
-2. **Flex-Tag suchen:** „Ganzer Tag“ einschalten, Datum wählen, warten, das günstigste
-   Ticket mit niedriger Anschluss-Quote nehmen (siehe oben).
+2. **Flex-Tag suchen:** „Ganzer Tag“ einschalten, Datum und Grenzen (Min. Flex, Max.
+   Anschluss, Max. Preis) wählen, warten, das günstigste Ticket mit niedriger
+   Anschluss-Quote nehmen (siehe oben).
 3. **Oder normal suchen:** Datum und Zeitfenster wählen.
    - **Schnell:** nutzt vor allem den Cache, sofort Ergebnisse
    - **Gründlich:** Standard, sucht kurze ICE-Stücke und Alternativen
    - **Tiefensuche:** systematisch über mehrere Zeitfenster, dauert länger
 4. **Buchen:** Mit **„Bei DB prüfen“** das Ticket auf bahn.de öffnen und dort buchen, danach
    in der App als „Gebucht“ markieren (oder die Buchungsmail kommt von selbst).
-5. **Unterwegs:** Die App verfolgt die Fahrt. Platzt ein Anschluss, siehst du es sofort, und
-   nach der Reise ist der Entschädigungsantrag einen Knopfdruck entfernt.
+5. **Am Reisetag:** Die App beobachtet alle Züge schon vorher. Ist die Zugbindung weg, wählst
+   du auf der Fahrt-Seite eine Ersatzverbindung; nach der Reise ist der
+   Entschädigungsantrag einen Knopfdruck entfernt.
 
 ## Installation
 
