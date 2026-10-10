@@ -63,6 +63,16 @@ describe("Wofür gilt das Ticket?", () => {
     expect(assessCoverage(journey({ fromName: "Mannheim Hbf", toName: "Marktplatz, Triberg im Schwarzwald" }), undefined, { deutschlandTicket: true }).coverage).toBe("red");
   });
 
+  it("ein Preis ohne geprüften Geltungsbereich ist nie „bestätigt“ und als ungeprüft markiert", () => {
+    const priced = journey(null);
+    const c = assessCoverage(priced);
+    expect(c).toMatchObject({ spanChecked: false });
+    expect(c.reason).not.toMatch(/bestätigt/);
+    expect(c.reason).toMatch(/nicht bei der DB geprüft/);
+    const checked = { ...priced, price: { ...priced.price!, spanChecked: true } };
+    expect(assessCoverage(checked)).toMatchObject({ spanChecked: true, reason: "Durchgehendes Ticket bestätigt" });
+  });
+
   it("verwechselt Essen Hbf nicht mit Essen-Steele", () => {
     const viaHbf = [legs[0], { ...legs[2], origin: { name: "Essen Hbf" } }, { ...legs[2], origin: { name: "Essen-Steele" }, lineName: "S 1" }, ...legs.slice(3)];
     expect(uncoveredLegs(viaHbf, "Essen-Steele", "Triberg")).toEqual([0, 1, 5, 6]);

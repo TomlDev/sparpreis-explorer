@@ -1,5 +1,6 @@
 import { eq, like } from "drizzle-orm";
 import { earlyExitResults } from "./earlyExit";
+import { checkOfferSpan } from "./spanCheck";
 import { db } from "@/db/client";
 import { journeyQueries, searchRuns } from "@/db/schema";
 import { newId, now } from "@/db/util";
@@ -976,34 +977,22 @@ export async function runSearch(params: SearchParams, opts: RunOptions): Promise
     // Essen-Steele – Triberg"). Legs outside it aren't covered — a tight
     // transfer there is unprotected. Checked for the cheapest fresh results only.
     if (pricing && !abort()) {
-      const fresh = [...collected.values()]
-        .filter((r) => onTravelDay(r) && r.coverage.price != null && r.refreshToken && r.coverage.uncoveredLegs === undefined)
+      // Every priced result that would be shown (cheapest first) — the span must never be
+      // missing; what's left unchecked is marked and checked when opened.
+      const fresh = applyFilters(
+        [...collected.values()].filter((r) => onTravelDay(r) && r.coverage.price != null && r.refreshToken && !r.coverage.spanChecked),
+        params.filters,
+      )
         .sort((a, b) => a.coverage.price! - b.coverage.price!)
-        .slice(0, params.daySlot ? 4 : 8);
+        .slice(0, params.daySlot ? 10 : 20);
       for (const r of fresh) {
         if (dailyRemaining() <= 0 || abort()) break;
         onDbUse();
         try {
           await jitter();
-          const offer = await pricing.refreshJourney(r.refreshToken!, {
-            tickets: true,
-            stopovers: false,
-            bahncard: prefs.bahncard,
-            klasse: prefs.klasse,
-            deutschlandTicket: prefs.deutschlandTicket,
-          });
-          const span = offer.ticketInfo;
-          const stored = loadJourney(r.fingerprint);
-          if (!span?.fromName || !span.toName || !stored?.price) continue;
-          stored.ticketInfo = { ...span, klasse: prefs.klasse };
-          stored.price.spanChecked = true;
-          // the offer details carry today's price of this very connection too
-          if (typeof offer.price?.amount === "number") stored.price.amount = offer.price.amount;
-          r.coverage = assessCoverage(stored, expected, { deutschlandTicket: prefs.deutschlandTicket });
-          r.priceCheckedAt = now();
-          saveJourneyResult(params.travelDate, pricing.name, stored, r);
+          await checkOfferSpan(r, params.travelDate, expected);
         } catch {
-          /* best effort — the result keeps its price */
+          /* best effort — the result keeps its price (marked as unchecked) */
         }
       }
       emit({ type: "results", results: snapshot(), meta: meta() });

@@ -17,6 +17,8 @@ export interface CoverageResult {
   offerToName: string | null;
   /** Legs the ticket doesn't cover (tram / bus before or after DB's tariff area). */
   uncoveredLegs?: number[];
+  /** DB's offer details were read: the span ("Gilt nur für …") is known, not assumed. */
+  spanChecked?: boolean;
 }
 
 const TRAIN = new Set(["nationalExpress", "national", "regionalExpress", "regional", "suburban"]);
@@ -81,6 +83,15 @@ function stationsRelated(a?: string | null, b?: string | null): boolean {
  * partial-route price must never be shown as a full through-ticket.
  */
 export function assessCoverage(
+  journey: NormJourney,
+  expected?: { fromName?: string; toName?: string },
+  opts: { deutschlandTicket?: boolean } = {},
+): CoverageResult {
+  const c = assessCoverageInner(journey, expected, opts);
+  return c.price != null ? { ...c, spanChecked: !!journey.price?.spanChecked } : c;
+}
+
+function assessCoverageInner(
   journey: NormJourney,
   expected?: { fromName?: string; toName?: string },
   opts: { deutschlandTicket?: boolean } = {},
@@ -184,7 +195,8 @@ export function assessCoverage(
     }
     return {
       coverage: "green",
-      reason: "Durchgehendes Ticket bestätigt",
+      // priced for the whole trip — what DB's offer really covers is only known once checked
+      reason: price.spanChecked ? "Durchgehendes Ticket bestätigt" : "Preis für die ganze Verbindung – Geltungsbereich noch nicht bei der DB geprüft",
       isFullRoute: true,
       price: price.amount,
       currency: price.currency,

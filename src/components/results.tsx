@@ -78,7 +78,7 @@ interface PriceRow {
 }
 
 export function ResultCard({
-  r,
+  r: given,
   travelDate,
   compareOn,
   onToggleCompare,
@@ -87,6 +87,7 @@ export function ResultCard({
   onSetReference,
   open: openProp,
   onOpenChange,
+  onUpdate,
 }: {
   r: SearchResult;
   travelDate: string;
@@ -98,9 +99,34 @@ export function ResultCard({
   /** Controlled expand state (e.g. mirrored into the URL); local if omitted. */
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+  /** The result changed here (ticket span checked) — lets the list re-filter. */
+  onUpdate?: (r: SearchResult) => void;
 }) {
   const [openLocal, setOpenLocal] = React.useState(false);
   const open = openProp ?? openLocal;
+  // Ticket span ("Gilt nur für …") must never be missing: a priced result without it is
+  // checked as soon as it is opened.
+  const [fresh, setFresh] = React.useState<SearchResult | null>(null);
+  const r = fresh?.fingerprint === given.fingerprint ? { ...given, ...fresh, variant: given.variant, variantLabel: given.variantLabel } : given;
+  const [spanState, setSpanState] = React.useState<"idle" | "checking" | string>("idle");
+  const unchecked = r.coverage.price != null && !r.coverage.spanChecked;
+  React.useEffect(() => {
+    if (!open || !unchecked || spanState !== "idle") return;
+    setSpanState("checking");
+    fetch("/api/span", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fingerprint: given.fingerprint, travelDate }),
+    })
+      .then(async (res) => {
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok || !d.result) return setSpanState(d.error ?? "Prüfung fehlgeschlagen");
+        setFresh(d.result);
+        onUpdate?.(d.result);
+        setSpanState("idle");
+      })
+      .catch(() => setSpanState("Keine Verbindung"));
+  }, [open, unchecked, spanState, given.fingerprint, travelDate, onUpdate]);
   const [history, setHistory] = React.useState<PriceRow[] | null>(null);
   const [saved, setSaved] = React.useState(false);
   const [bookedId, setBookedId] = React.useState<string | null>(null);
@@ -249,11 +275,22 @@ export function ResultCard({
                 🚪 Früher aussteigen: Ticket bis {ee.ticketTo}, du steigst in {m.destinationName} aus
               </div>
             ) : (
-              !!r.coverage.uncoveredLegs?.length && (
-                <div className="mt-0.5 text-xs text-muted-foreground">
-                  🎫 Ticket gilt {r.coverage.offerFromName} → {r.coverage.offerToName}
-                </div>
-              )
+              <>
+                {!!r.coverage.uncoveredLegs?.length && (
+                  <div className="mt-0.5 text-xs font-medium text-foreground">
+                    🎫 Gilt nur für {r.coverage.offerFromName} – {r.coverage.offerToName}
+                  </div>
+                )}
+                {unchecked && (
+                  <div className="mt-0.5 text-xs font-medium text-warning">
+                    {spanState === "checking"
+                      ? "Geltungsbereich wird bei der DB geprüft …"
+                      : spanState !== "idle"
+                        ? `⚠ Geltungsbereich ungeprüft – ${spanState}`
+                        : "⚠ Geltungsbereich ungeprüft – kann eine Teilstrecke sein (öffnen prüft)"}
+                  </div>
+                )}
+              </>
             )}
             <div className="mt-1.5">
               <ChainPills legs={r.legs} />

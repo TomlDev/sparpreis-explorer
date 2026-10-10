@@ -96,7 +96,12 @@ export function useSearch() {
     }
   }, []);
 
-  return { state, run, abort };
+  /** Replace one result (e.g. after its ticket span was checked) without a new search. */
+  const patch = React.useCallback((r: SearchState["results"][number]) => {
+    setState((s) => ({ ...s, results: s.results.map((x) => (x.fingerprint === r.fingerprint ? { ...x, ...r, variant: x.variant, variantLabel: x.variantLabel } : x)) }));
+  }, []);
+
+  return { state, run, abort, patch };
 }
 
 /** One-shot search that just returns the final best price + count (used by the

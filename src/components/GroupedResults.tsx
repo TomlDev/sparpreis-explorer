@@ -106,6 +106,13 @@ function CompactRow({ r, onOpen }: { r: SearchResult; onOpen: () => void }) {
         <div className="truncate text-xs text-muted-foreground">
           {m.originName} → {m.destinationName}
           {r.earlyExit && <span className="font-medium text-primary"> · 🚪 Ticket bis {r.earlyExit.ticketTo}</span>}
+          {!r.earlyExit && !!r.coverage.uncoveredLegs?.length && (
+            <span className="font-medium text-foreground">
+              {" "}
+              · 🎫 gilt nur {r.coverage.offerFromName} – {r.coverage.offerToName}
+            </span>
+          )}
+          {r.coverage.price != null && !r.coverage.spanChecked && <span className="font-medium text-warning"> · ⚠ Geltungsbereich ungeprüft</span>}
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-1.5">
