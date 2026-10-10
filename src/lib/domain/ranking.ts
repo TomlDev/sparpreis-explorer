@@ -8,7 +8,8 @@ export type SortMode =
   | "least-fv"
   | "fewest-transfers"
   | "tight-transfers"
-  | "unreliable";
+  | "unreliable"
+  | "cheap-flex";
 
 export const SORT_LABELS: Record<SortMode, string> = {
   proforma: "✨ Pro-Forma",
@@ -18,12 +19,41 @@ export const SORT_LABELS: Record<SortMode, string> = {
   "fewest-transfers": "🔁 Wenigste Umstiege",
   "tight-transfers": "⏱ Knappe Umstiege",
   unreliable: "🎲 Unzuverlässigste",
+  "cheap-flex": "🎯 Günstig & oft Flex",
 };
 
 /** Highest chance of ≥ 20 min delay first (Zugbindung likely lifted);
  *  connections without punctuality data last. */
 export function flexOrder(a: SearchResult, b: SearchResult): number {
   return (b.reliability?.flexPct ?? -1) - (a.reliability?.flexPct ?? -1);
+}
+
+/**
+ * "Günstig & oft Flex": cheap connections with a high chance that the
+ * Zugbindung gets lifted (≥ 20 min late). First come the connections for
+ * which no other is both cheaper and more likely to be late (Pareto front of
+ * price vs. flexPct), then the next such layer, and so on — each by price.
+ * Without price or punctuality data: last.
+ */
+export function cheapFlexOrder(results: SearchResult[]): SearchResult[] {
+  const rated = results.filter((r) => r.coverage.price != null && r.reliability);
+  const rest = results.filter((r) => !rated.includes(r));
+  let left = [...rated].sort((a, b) => a.coverage.price! - b.coverage.price! || b.reliability!.flexPct - a.reliability!.flexPct);
+  const out: SearchResult[] = [];
+  while (left.length) {
+    const front: SearchResult[] = [];
+    const next: SearchResult[] = [];
+    let best = -1;
+    for (const r of left) {
+      if (r.reliability!.flexPct > best) {
+        front.push(r);
+        best = r.reliability!.flexPct;
+      } else next.push(r);
+    }
+    out.push(...front);
+    left = next;
+  }
+  return [...out, ...rest.sort(flexOrder)];
 }
 
 /**
@@ -75,6 +105,9 @@ export function compareBy(mode: SortMode): (a: SearchResult, b: SearchResult) =>
         (a.metrics.minTransferMin ?? 1e9) - (b.metrics.minTransferMin ?? 1e9);
     case "unreliable":
       return (a, b) => flexOrder(a, b) || priceOr(a, 1e9) - priceOr(b, 1e9);
+    case "cheap-flex":
+      // Needs the whole set — callers use cheapFlexOrder(); this keeps a sane pairwise fallback.
+      return (a, b) => priceOr(a, 1e9) - priceOr(b, 1e9) || flexOrder(a, b);
     case "proforma":
     default:
       return (a, b) => a.score - b.score;
@@ -119,6 +152,7 @@ export function rankResults(
     }
   }
 
+  if (mode === "cheap-flex") return cheapFlexOrder(results);
   const cmp = compareBy(mode);
   return [...results].sort(cmp);
 }

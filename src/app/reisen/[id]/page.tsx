@@ -737,8 +737,9 @@ function ClaimBox({ t, ent, onDone }: { t: Detail; ent: NonNullable<ReturnType<t
             {busy ? <Spinner /> : <FileDown className="h-4 w-4" />} Formular ausgefüllt herunterladen
           </Button>
           <p className="text-xs text-muted-foreground">
-            Offizielles DB-Fahrgastrechte-Formular mit deinen Daten aus den Einstellungen. Unterschreiben und per Post an
-            „DB Fernverkehr AG, Servicecenter Fahrgastrechte, 60647 Frankfurt am Main“ schicken (oder im Reisezentrum abgeben).
+            Offizielles DB-Fahrgastrechte-Formular mit deinen Daten und deiner Unterschrift aus den Einstellungen (ohne
+            gespeicherte Unterschrift: selbst unterschreiben). Per Post an „DB Fernverkehr AG, Servicecenter Fahrgastrechte, 60647
+            Frankfurt am Main“ schicken oder im Reisezentrum abgeben.
           </p>
           {err && (
             <p className="text-sm text-danger">

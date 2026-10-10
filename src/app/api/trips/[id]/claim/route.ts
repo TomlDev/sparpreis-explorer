@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { ensureReady } from "@/lib/bootstrap";
 import { fillClaimForm, FORM_ADDRESS } from "@/lib/trips/claimForm";
 import { getProfile, ibanValid } from "@/lib/trips/profile";
-import { getTrip, saveAttachment, saveClaim } from "@/lib/trips/repo";
+import { deleteAttachment, getTrip, saveAttachment, saveClaim } from "@/lib/trips/repo";
+import { getSignature } from "@/lib/trips/signature";
 import { arrivalDelayMin, assess, ticketSpan, type FormJourney } from "@/lib/trips/rules";
 
 export const runtime = "nodejs";
@@ -53,10 +54,16 @@ export async function POST(req: Request, { params }: Ctx) {
     station: typeof b.station === "string" ? b.station : null,
     extra: { ticket: extra.ticket === true, transport: extra.transport === true, overnight: extra.overnight === true, other: extra.other === true },
     reservationUnused: b.reservationUnused === true,
+    signature: getSignature(),
   });
   const name = `Fahrgastrechte ${trip.date} ${span.from}-${span.to}.pdf`;
+  // Generated again (e.g. after adding the signature) → replace the unsent draft instead of adding a second claim.
+  const draft = trip.claims.find((c) => c.status === "draft" && !c.caseId);
+  const oldForm = draft?.notes ? /Formular erzeugt \((att_[^)]+)\)/.exec(draft.notes)?.[1] : undefined;
   const attachment = saveAttachment(trip.id, { name, type: "application/pdf", bytes: Buffer.from(pdf) }, "claim", "Fahrgastrechte-Formular");
+  if (oldForm && trip.attachments.some((a) => a.id === oldForm)) deleteAttachment(oldForm);
   const claim = saveClaim(trip.id, {
+    id: draft?.id,
     type: journey,
     delayMin: journey === "delay" ? arrivalDelayMin(span.arrival, trip.actualArrival) : expectedDelayMin,
     amount: ent.amount ?? null,

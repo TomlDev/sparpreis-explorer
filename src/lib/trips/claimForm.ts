@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { PDFCheckBox, PDFDocument, PDFRadioGroup, PDFTextField } from "pdf-lib";
+import { PDFCheckBox, PDFDocument, PDFRadioGroup, PDFSignature, PDFTextField } from "pdf-lib";
 import { formatInTimeZone } from "date-fns-tz";
 import type { TripRow } from "@/db/schema";
 import type { ClaimantProfile } from "./profile";
@@ -43,6 +43,8 @@ export interface ClaimFormInput {
   station?: string | null;
   extra?: { ticket?: boolean; transport?: boolean; overnight?: boolean; other?: boolean };
   reservationUnused?: boolean;
+  /** Transparent PNG of the claimant's signature, placed on the signature line. */
+  signature?: Buffer | null;
 }
 
 const TZ = "Europe/Berlin";
@@ -58,7 +60,12 @@ export function fit(value: string, max: number): string {
     .replace(/\s*\(([^)]*)\)/g, "($1)")
     .replace(/ im Schwarzwald/g, "/Schw.")
     .replace(/Frankfurt\(M(ain)?\)/g, "Ffm");
-  return short.length <= max ? short : short.slice(0, max);
+  if (short.length <= max) return short;
+  // Still too long: the region after the town goes first ("…, Gutach im Breisgau" → "…,Gutach").
+  const bare = short
+    .replace(/\s+(im|am|an der|in der|ob der)\s+[^,]+$|\/Schw\.$|\s*\([^)]*\)$/, "")
+    .replace(/,\s+/g, ",");
+  return bare.slice(0, max);
 }
 
 const COUNTRY: Record<string, string> = {
@@ -173,7 +180,25 @@ export async function fillClaimForm(input: ClaimFormInput): Promise<Uint8Array> 
     check("personal_email", true);
     text("personal_emailaddress", p.email);
   }
-  text("date", formatInTimeZone(new Date(), TZ, "dd.MM.yyyy"));
+  // Auto size follows the field height and would cut off the last digit of the year.
+  const date = form.getField("date");
+  if (date instanceof PDFTextField) {
+    date.setFontSize(10);
+    date.setText(formatInTimeZone(new Date(), TZ, "dd.MM.yyyy"));
+  }
+
+  if (input.signature) {
+    const field = form.getField("signature");
+    const widget = field.acroField.getWidgets()[0];
+    const rect = widget.getRectangle();
+    const page = doc.getPages().find((pg) => pg.ref === widget.P()) ?? doc.getPages()[1];
+    const img = await doc.embedPng(input.signature);
+    // Like ink: may run over the line and touch the text above.
+    const scale = Math.min((rect.width - 8) / img.width, (rect.height * 1.6) / img.height);
+    page.drawImage(img, { x: rect.x + 4, y: rect.y - 6, width: img.width * scale, height: img.height * scale });
+    // An empty signature field would put a "sign here" overlay over the image in some viewers.
+    if (field instanceof PDFSignature) form.removeField(field);
+  }
 
   return doc.save();
 }

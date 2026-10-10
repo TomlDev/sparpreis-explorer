@@ -68,6 +68,7 @@ const SORTS: SortMode[] = [
   "fewest-transfers",
   "tight-transfers",
   "unreliable",
+  "cheap-flex",
 ];
 const MODES: SearchModeKey[] = ["fast", "thorough", "deep"];
 const DIALOGS: ViewDialog[] = ["filters", "calendar", "compare"];

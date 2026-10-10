@@ -626,6 +626,14 @@ function Home() {
           </div>
         )}
 
+        {sort === "cheap-flex" && displayResults.length > 0 && (
+          <p className="mt-3 text-xs text-muted-foreground">
+            🎯 Oben stehen Verbindungen, zu denen es keine günstigere mit höherer Flex-Chance gibt. Flex = Chance auf ≥ 20 min
+            Verspätung am Ziel – dann ist die Zugbindung aufgehoben. Schätzung aus vergangenen Monaten (Open Data), keine
+            Garantie.
+          </p>
+        )}
+
         {/* Results */}
         <div className="mt-4 space-y-3">
           {sorted.length === 0 && !state.running && referenceFp && displayResults.length > 0 ? (

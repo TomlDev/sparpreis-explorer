@@ -1,4 +1,4 @@
-import { flexOrder, type SortMode } from "@/lib/domain/ranking";
+import { cheapFlexOrder, flexOrder, type SortMode } from "@/lib/domain/ranking";
 import type { SearchResult } from "@/lib/domain/result";
 import type { SearchFilters } from "@/lib/engine/types";
 import { formatTime, toMin } from "@/lib/time";
@@ -152,6 +152,7 @@ export function clientFilter(
 
 /** Lightweight client-side re-sort (mirrors server ranking's comparators). */
 export function clientSort(results: SearchResult[], mode: SortMode): SearchResult[] {
+  if (mode === "cheap-flex") return cheapFlexOrder(results);
   const price = (r: SearchResult, f: number) => r.coverage.price ?? f;
   const cmp: Record<SortMode, (a: SearchResult, b: SearchResult) => number> = {
     proforma: (a, b) => a.score - b.score,
@@ -161,6 +162,7 @@ export function clientSort(results: SearchResult[], mode: SortMode): SearchResul
     "fewest-transfers": (a, b) => a.metrics.transfers - b.metrics.transfers || price(a, 1e9) - price(b, 1e9),
     "tight-transfers": (a, b) => (a.metrics.minTransferMin ?? 1e9) - (b.metrics.minTransferMin ?? 1e9),
     unreliable: (a, b) => flexOrder(a, b) || price(a, 1e9) - price(b, 1e9),
+    "cheap-flex": (a, b) => price(a, 1e9) - price(b, 1e9) || flexOrder(a, b),
   };
   return [...results].sort(cmp[mode]);
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Button, Card, Input, Switch } from "@/components/ui";
+import { Button, Card, Input, Spinner, Switch } from "@/components/ui";
 
 interface Profile {
   salutation: string;
@@ -126,10 +126,90 @@ export function ClaimantCard() {
         )}
         <div className="mt-2 grid gap-2 sm:grid-cols-2">{field("bahnBonusNumber", "BahnBonus-Nummer (nur wenn Punkte eingelöst)")}</div>
       </div>
+      <SignatureField />
       {err && <p className="mt-2 text-sm text-danger">{err}</p>}
       <Button className="mt-3" onClick={save}>
         {saved ? "Gespeichert ✓" : "Speichern"}
       </Button>
     </Card>
+  );
+}
+
+/** Signature for the form: a photo / screenshot, background removed on the server. */
+function SignatureField() {
+  const [rev, setRev] = React.useState(0);
+  const [has, setHas] = React.useState<boolean | null>(null);
+  const [busy, setBusy] = React.useState(false);
+  const [err, setErr] = React.useState<string | null>(null);
+  const fileRef = React.useRef<HTMLInputElement>(null);
+
+  React.useEffect(() => {
+    fetch("/api/claimant/signature", { method: "HEAD" })
+      .then((r) => setHas(r.ok))
+      .catch(() => setHas(false));
+  }, [rev]);
+
+  async function upload(file: File) {
+    setBusy(true);
+    setErr(null);
+    try {
+      const body = new FormData();
+      body.append("file", file);
+      const res = await fetch("/api/claimant/signature", { method: "POST", body });
+      if (!res.ok) setErr((await res.json().catch(() => ({}))).error ?? "Hochladen fehlgeschlagen");
+      setRev((r) => r + 1);
+    } catch {
+      setErr("Hochladen fehlgeschlagen – keine Verbindung");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mt-4 border-t border-border pt-3">
+      <h3 className="mb-1 text-sm font-medium">Unterschrift</h3>
+      <p className="mb-2 text-xs text-muted-foreground">
+        Foto oder Screenshot deiner Unterschrift (dunkel auf hellem Grund). Der Hintergrund wird entfernt, dann steht sie auf
+        jedem erzeugten Formular.
+      </p>
+      {has && (
+        <img
+          src={`/api/claimant/signature?v=${rev}`}
+          alt="Gespeicherte Unterschrift"
+          className="mb-2 h-16 max-w-full rounded-lg border border-border bg-white object-contain p-1"
+        />
+      )}
+      <div className="flex flex-wrap gap-2">
+        <Button size="sm" variant="outline" disabled={busy} onClick={() => fileRef.current?.click()}>
+          {busy ? <Spinner /> : has ? "Ersetzen" : "Bild hochladen"}
+        </Button>
+        {has && (
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={busy}
+            onClick={async () => {
+              if (!confirm("Unterschrift löschen?")) return;
+              await fetch("/api/claimant/signature", { method: "DELETE" }).catch(() => {});
+              setRev((r) => r + 1);
+            }}
+          >
+            Entfernen
+          </Button>
+        )}
+      </div>
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          e.target.value = "";
+          if (f) void upload(f);
+        }}
+      />
+      {err && <p className="mt-2 text-sm text-danger">{err}</p>}
+    </div>
   );
 }
