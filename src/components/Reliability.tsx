@@ -25,6 +25,17 @@ export function reliabilitySummary(rel: Reliability): string {
   return parts.join("\n");
 }
 
+/**
+ * "Anschluss" = chance every transfer holds. For Flex hunting low is good (a
+ * connection that breaks lifts the Zugbindung): the lower, the stronger green.
+ */
+export function connectionTone(okPct: number): string | undefined {
+  if (okPct < 0.05) return "bg-success text-white";
+  if (okPct < 0.1) return "bg-success/50 text-foreground";
+  if (okPct < 0.15) return "bg-success/20 text-success";
+  return undefined;
+}
+
 /** Compact chips for the result card. */
 export function ReliabilityBadges({ rel }: { rel: Reliability | null | undefined }) {
   if (!rel) return null;
@@ -32,7 +43,7 @@ export function ReliabilityBadges({ rel }: { rel: Reliability | null | undefined
   return (
     <>
       {rel.transfers.length > 0 && (
-        <Badge variant={rel.okPct < 0.7 ? "danger" : rel.okPct < 0.85 ? "warning" : "muted"} title={title}>
+        <Badge variant="muted" className={connectionTone(rel.okPct)} title={title}>
           Anschluss {pct(rel.okPct)}
         </Badge>
       )}

@@ -20,7 +20,7 @@ import { ProviderError, type NormJourney, type ProductFilter } from "@/lib/rail/
 import { loadJourney, loadResults, saveJourneyResult } from "@/lib/repo/journeys";
 import { getProfile, resolveStation, searchableStations, type RouteProfile } from "@/lib/routeProfiles";
 import { upsertLocation } from "@/lib/repo/locations";
-import { localDeparture } from "@/lib/time";
+import { berlinDay, localDeparture } from "@/lib/time";
 import { dlog } from "@/lib/log";
 import { getInterestingEdges, learnFromJourney } from "./patterns";
 import { annotateReliability } from "@/lib/delay";
@@ -282,12 +282,18 @@ export async function runSearch(params: SearchParams, opts: RunOptions): Promise
     })
     .run();
 
+  // Late slots and pro-forma searches also return the next morning's trains — only
+  // the searched day counts (departure day; arrival day when searching by arrival).
+  const onTravelDay = (r: SearchResult): boolean => {
+    const t = params.timeMode === "arrival" ? r.metrics.plannedArrival : r.metrics.plannedDeparture;
+    return !t || berlinDay(t) === params.travelDate;
+  };
   const meta = (): SearchMeta => {
     const variants = new Map<string, number>();
     for (const r of collected.values()) {
       if (r.variantLabel) variants.set(r.variantLabel, (variants.get(r.variantLabel) ?? 0) + 1);
     }
-    const prices = [...collected.values()].map((r) => r.coverage.price).filter((p): p is number => p != null);
+    const prices = [...collected.values()].filter(onTravelDay).map((r) => r.coverage.price).filter((p): p is number => p != null);
     const st = providerStatuses();
     return {
       stale: false,
@@ -329,7 +335,7 @@ export async function runSearch(params: SearchParams, opts: RunOptions): Promise
         r.resultKind === "proforma" && p != null && anchorPrice != null && p < anchorPrice;
     }
     annotateReliability(collected.values(), params.travelDate);
-    return rankResults(applyFilters([...collected.values()], params.filters), params.sort);
+    return rankResults(applyFilters([...collected.values()].filter(onTravelDay), params.filters), params.sort);
   };
 
   const ingest = (
@@ -955,7 +961,7 @@ export async function runSearch(params: SearchParams, opts: RunOptions): Promise
     // transfer there is unprotected. Checked for the cheapest fresh results only.
     if (pricing && !abort()) {
       const fresh = [...collected.values()]
-        .filter((r) => r.coverage.price != null && r.refreshToken && r.coverage.uncoveredLegs === undefined)
+        .filter((r) => onTravelDay(r) && r.coverage.price != null && r.refreshToken && r.coverage.uncoveredLegs === undefined)
         .sort((a, b) => a.coverage.price! - b.coverage.price!)
         .slice(0, params.daySlot ? 4 : 8);
       for (const r of fresh) {
