@@ -3,7 +3,7 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { CalendarDays, FlaskConical, LogOut, Search, Settings, TrainFront } from "lucide-react";
+import { CalendarDays, LogOut, Search, Settings, TrainFront } from "lucide-react";
 import { Button, buttonClass } from "@/components/ui";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { TodayBanner } from "@/components/trips/TodayBanner";
@@ -34,9 +34,7 @@ export function AppHeader({ center }: { center?: ReactNode }) {
           <Link href="/" className={buttonClass("ghost", "icon")} aria-label="Suche" title="Ticketsuche">
             <Search className="h-5 w-5" />
           </Link>
-          <Link href="/lab" className={buttonClass("ghost", "icon")} aria-label="Lab" title="Lab">
-            <FlaskConical className="h-5 w-5" />
-          </Link>
+          <span aria-hidden className="mx-0.5 !h-6 !w-px bg-border sm:mx-1" />
           <Link href="/settings" className={buttonClass("ghost", "icon")} aria-label="Einstellungen" title="Einstellungen">
             <Settings className="h-5 w-5" />
           </Link>

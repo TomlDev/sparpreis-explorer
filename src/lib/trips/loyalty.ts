@@ -287,7 +287,7 @@ export function reminders(today = todayLocal()): Reminder[] {
       id: `claim-${claim.id}`,
       date: addDays(berlinDay(claim.submittedAt), 31),
       title: `Fahrgastrechte${claim.caseId ? ` ${claim.caseId}` : ""}: noch keine Antwort`,
-      detail: `Eingereicht vor einem Monat (${trip.originName} → ${trip.destName}, ${trip.date}). Ggf. beim Servicecenter nachfragen.`,
+      detail: `Eingereicht am ${new Date(claim.submittedAt).toLocaleDateString("de-DE", { timeZone: "Europe/Berlin" })} (${trip.originName} → ${trip.destName}, Fahrt vom ${trip.date.split("-").reverse().join(".")}). Die DB antwortet meist innerhalb eines Monats – sonst beim Servicecenter nachfragen.`,
       kind: "claim",
       href: `/reisen/${trip.id}`,
     });

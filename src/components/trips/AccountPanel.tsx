@@ -66,7 +66,11 @@ export function useAccount() {
 export function Reminders({ list }: { list: Reminder[] }) {
   const [all, setAll] = React.useState(false);
   const t = today();
-  const relevant = list.filter((r) => r.kind === "trip" || r.date >= t);
+  // Only what is close: claims without an answer from a week before the month is up (and while
+  // overdue), everything else from 30 days before; open past trips always.
+  const relevant = list.filter((r) =>
+    r.kind === "trip" ? true : r.kind === "claim" ? daysUntil(r.date) <= 7 : r.date >= t && daysUntil(r.date) < 31,
+  );
   if (!relevant.length) return null;
   const shown = all ? relevant : relevant.slice(0, 4);
   return (
@@ -85,6 +89,8 @@ export function Reminders({ list }: { list: Reminder[] }) {
                     {new Date(`${r.date}T12:00:00Z`).toLocaleDateString("de-DE", { weekday: "short", day: "numeric", month: "numeric", year: "2-digit" })}
                     <span className="block text-[11px]">offen</span>
                   </>
+                ) : d < 0 && r.kind === "claim" ? (
+                  <span className="font-semibold text-warning">seit {-d} T.</span>
                 ) : d === 0 ? (
                   "heute"
                 ) : d > 0 && d <= 60 ? (

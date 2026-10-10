@@ -19,7 +19,21 @@ function monthBounds(ym: string) {
   const first = new Date(Date.UTC(y, m - 1, 1));
   const days = new Date(Date.UTC(y, m, 0)).getUTCDate();
   const lead = (first.getUTCDay() + 6) % 7; // Monday-first
-  return { y, m, days, lead, from: `${ym}-01`, to: `${ym}-${String(days).padStart(2, "0")}` };
+  const trail = (7 - ((lead + days) % 7)) % 7;
+  const day = (offset: number) => new Date(Date.UTC(y, m - 1, 1 + offset)).toISOString().slice(0, 10);
+  return {
+    y,
+    m,
+    days,
+    lead,
+    trail,
+    from: `${ym}-01`,
+    to: `${ym}-${String(days).padStart(2, "0")}`,
+    // the whole weeks shown: days of the neighbouring months included
+    gridFrom: day(-lead),
+    gridTo: day(days - 1 + trail),
+    day,
+  };
 }
 const shiftMonth = (ym: string, d: number) => {
   const [y, m] = ym.split("-").map(Number);
@@ -97,13 +111,13 @@ export default function TripsPage() {
   const load = React.useCallback(async () => {
     const id = ++reqId.current;
     try {
-      const r = await fetch(`/api/trips?from=${b.from}&to=${b.to}`);
+      const r = await fetch(`/api/trips?from=${b.gridFrom}&to=${b.gridTo}`);
       const d = r.ok ? await r.json() : { trips: [] };
       if (id === reqId.current) setTrips(d.trips ?? []);
     } catch {
       /* offline: keep what is shown */
     }
-  }, [b.from, b.to]);
+  }, [b.gridFrom, b.gridTo]);
   React.useEffect(() => {
     load();
     window.history.replaceState(null, "", `?m=${month}`);
@@ -116,7 +130,8 @@ export default function TripsPage() {
   const plans = planStates(trips);
   const today = todayStr();
   // Trips already shown under "Als Nächstes" aren't repeated below the calendar.
-  const rest = trips.filter((t) => !nextIds.includes(t.id));
+  const monthTrips = trips.filter((t) => t.date >= b.from && t.date <= b.to);
+  const rest = monthTrips.filter((t) => !nextIds.includes(t.id));
   const title = new Date(Date.UTC(b.y, b.m - 1, 15)).toLocaleDateString("de-DE", { month: "long", year: "numeric" });
 
   return (
@@ -184,11 +199,10 @@ export default function TripsPage() {
             ))}
           </div>
           <div className="mt-1 grid grid-cols-7 gap-1">
-            {Array.from({ length: b.lead }, (_, i) => (
-              <div key={`l${i}`} />
-            ))}
-            {Array.from({ length: b.days }, (_, i) => {
-              const day = `${month}-${String(i + 1).padStart(2, "0")}`;
+            {/* whole weeks: days of the neighbouring months greyed, with their trips */}
+            {Array.from({ length: b.lead + b.days + b.trail }, (_, k) => {
+              const day = b.day(k - b.lead);
+              const other = k < b.lead || k >= b.lead + b.days;
               const list = byDay.get(day) ?? [];
               return (
                 <div
@@ -196,11 +210,11 @@ export default function TripsPage() {
                   className={cn(
                     "min-h-[3.5rem] rounded-lg border border-border p-0.5 text-left text-[10px] sm:min-h-[4.5rem] sm:p-1 sm:text-[11px]",
                     day === today && "border-primary ring-1 ring-primary",
-                    list.length === 0 && "opacity-70",
+                    other ? "border-dashed bg-muted/30 opacity-50" : list.length === 0 && "opacity-70",
                   )}
                 >
                   <div className={cn("mb-0.5 flex items-center justify-between text-xs", day === today ? "font-bold text-primary" : "text-muted-foreground")}>
-                    {i + 1}
+                    {Number(day.slice(8))}
                     {remindersByDay.has(day) && (
                       <span title={remindersByDay.get(day)!.join("\n")} className="text-warning">
                         ⏰
@@ -232,10 +246,10 @@ export default function TripsPage() {
         <div className="space-y-2">
           {rest.length > 0 && (
             <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-              {rest.length < trips.length ? "Weitere Fahrten" : "Fahrten"} im {title}
+              {rest.length < monthTrips.length ? "Weitere Fahrten" : "Fahrten"} im {title}
             </h2>
           )}
-          {trips.length === 0 && (
+          {monthTrips.length === 0 && (
             <p className="text-sm text-muted-foreground">
               Keine Fahrten in diesem Monat. In der Suche bei einer Verbindung auf <b>„Gebucht“</b> tippen oder oben eine
               Fahrt eintragen.

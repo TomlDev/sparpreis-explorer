@@ -11,7 +11,7 @@ import { RELIABILITY_NOTE } from "@/components/Reliability";
 import { CompareView } from "@/components/CompareView";
 import { FiltersSheet } from "@/components/FiltersSheet";
 import { ResultCard } from "@/components/results";
-import { Button, Card, Chip, ProgressBar, Spinner, Switch } from "@/components/ui";
+import { Button, Card, Chip, Input, ProgressBar, Spinner, Switch } from "@/components/ui";
 import { useSearch } from "@/hooks/useSearch";
 import type { SearchResult } from "@/lib/domain/result";
 import { SORT_LABELS, type SortMode } from "@/lib/domain/ranking";
@@ -19,7 +19,7 @@ import type { SearchFilters } from "@/lib/engine/types";
 import { formatAgo, formatDateHuman, formatTime, todayLocal, windowToHHmm } from "@/lib/time";
 import { TimeRange } from "@/components/TimeRange";
 import { parseView, serializeView } from "@/lib/viewState";
-import { clientFilter, clientSort, refLeadKeysFor, timeFilterWindow } from "@/lib/viewFilter";
+import { clientFilter, clientSort, filterReason, refLeadKeysFor, timeFilterWindow } from "@/lib/viewFilter";
 import { formatEuro } from "@/lib/utils";
 
 interface Endpoint {
@@ -308,6 +308,32 @@ function Home() {
     [displayResults, filters, sort, referencePrice, refLeadKeys, timeWindow, timeTo, timeMode, dayScan],
   );
 
+  // What the filters hide right now — results "vanish" while searching when they get a price
+  // (then the unpriced go), turn out to be a partial ticket, or cross a limit.
+  const hiddenSummary = React.useMemo(() => {
+    const ctx = {
+      filters,
+      reference: referencePrice,
+      refLeadKeys,
+      window: dayScan ? null : timeFilterWindow(timeWindow, timeTo, timeMode),
+      anyPriced: displayResults.some((r) => r.coverage.price != null),
+    };
+    const counts = new Map<string, number>();
+    for (const r of displayResults) {
+      const why = filterReason(r, ctx);
+      if (!why) continue;
+      const label = why.includes("außerhalb")
+        ? "außerhalb des Zeitfensters"
+        : why.startsWith("andere ersten Züge")
+          ? "andere Züge als die Referenz"
+          : why.startsWith("kein durchgehendes Ticket")
+            ? "Ticket deckt nicht die ganze Strecke"
+            : why.split(" (")[0];
+      counts.set(label, (counts.get(label) ?? 0) + 1);
+    }
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  }, [displayResults, filters, referencePrice, refLeadKeys, dayScan, timeWindow, timeTo, timeMode]);
+
   const renderCard = (r: SearchResult) => (
     <ResultCard
       key={r.fingerprint + r.variant}
@@ -524,11 +550,18 @@ function Home() {
               <div className="rounded-xl border border-input bg-background px-3.5 py-1.5">
                 <Switch checked={dayScan} onChange={toggleDayScan} label="Ganzer Tag: günstigste Flex-Verbindung" />
                 {dayScan && (
-                  <p className="pb-1 text-xs text-muted-foreground">
-                    Sucht den ganzen Tag (ab 05 Uhr, 6 Zeitfenster) nach Tickets mit genau einem Fernverkehrs-Abschnitt und
-                    hoher Flex-Chance (ab {filters.minFlexPct ?? 0} %, im Filter änderbar) – sortiert nach Preis. Dauert ein
-                    paar Minuten.
-                  </p>
+                  <>
+                    <p className="pb-1 text-xs text-muted-foreground">
+                      Sucht den ganzen Tag (ab 05 Uhr, 6 Zeitfenster) nach Tickets mit genau einem Fernverkehrs-Abschnitt –
+                      sortiert nach Preis. Dauert ein paar Minuten.
+                    </p>
+                    {/* set before starting: they also decide which candidates get a price check */}
+                    <div className="grid grid-cols-3 gap-2 pb-2">
+                      <DayNum label="Min. Flex" suffix="%" value={filters.minFlexPct} onChange={(v) => setFilters({ ...filters, minFlexPct: v })} />
+                      <DayNum label="Max. Anschluss" suffix="%" value={filters.maxOkPct} onChange={(v) => setFilters({ ...filters, maxOkPct: v })} />
+                      <DayNum label="Max. Preis" suffix="€" value={filters.maxPrice} onChange={(v) => setFilters({ ...filters, maxPrice: v })} />
+                    </div>
+                  </>
                 )}
               </div>
               {!dayScan && (
@@ -766,6 +799,14 @@ function Home() {
           ) : (
             sorted.map((r) => renderCard(r))
           )}
+          {hiddenSummary.length > 0 && (
+            <p className="px-1 pt-1 text-xs text-muted-foreground">
+              {hiddenSummary.reduce((n, [, c]) => n + c, 0)} ausgeblendet: {hiddenSummary.map(([l, c]) => `${c} ${l}`).join(" · ")}{" "}
+              <button type="button" className="text-primary underline" onClick={() => setFiltersOpen(true)}>
+                Filter
+              </button>
+            </p>
+          )}
           {sorted.some((r) => r.reliability) && (
             <p className="px-1 pt-2 text-[11px] text-muted-foreground">Anschluss / Flex: {RELIABILITY_NOTE}</p>
           )}
@@ -962,5 +1003,26 @@ function EndpointSelect({
         ))}
       </select>
     </div>
+  );
+}
+
+/** Small number field in the day-scan box (empty = no limit). */
+function DayNum({ label, suffix, value, onChange }: { label: string; suffix: string; value: number | null; onChange: (v: number | null) => void }) {
+  return (
+    <label className="flex min-w-0 flex-col gap-0.5">
+      <span className="truncate text-[11px] text-muted-foreground">{label}</span>
+      <span className="flex items-center gap-1">
+        <Input
+          type="number"
+          inputMode="decimal"
+          min={0}
+          placeholder="–"
+          className="h-9 min-w-0 px-2 text-right"
+          value={value ?? ""}
+          onChange={(e) => onChange(e.target.value === "" ? null : Math.max(0, Number(e.target.value)))}
+        />
+        <span className="text-xs text-muted-foreground">{suffix}</span>
+      </span>
+    </label>
   );
 }

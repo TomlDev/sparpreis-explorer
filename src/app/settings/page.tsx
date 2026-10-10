@@ -1,7 +1,8 @@
 "use client";
 
 import * as React from "react";
-import { Check, ChevronDown, ChevronUp, Plus, Trash2 } from "lucide-react";
+import Link from "next/link";
+import { Check, ChevronDown, ChevronRight, ChevronUp, FlaskConical, Plus, Trash2 } from "lucide-react";
 import { AppHeader } from "@/components/AppHeader";
 import { ClaimantCard } from "@/components/ClaimantCard";
 import { DelayDataCard } from "@/components/DelayDataCard";
@@ -212,7 +213,7 @@ export default function SettingsPage() {
                     </div>
                     <AddStation
                       first={p.stations.length === 0}
-                      onAdd={(name) => post({ action: "addStation", profileId: p.id, stationName: name, query: name })}
+                      onAdd={(loc) => post({ action: "addStation", profileId: p.id, stationName: loc.name, query: loc.name, locationId: loc.id })}
                     />
                   </SettingsSection>
                 );
@@ -275,6 +276,18 @@ export default function SettingsPage() {
             </div>
             {doneMsg && <p className="mt-3 text-sm font-medium text-[#1B873F]">{doneMsg}</p>}
           </SettingsSection>
+
+          <Link
+            href="/lab"
+            className="flex items-center gap-2 rounded-2xl border border-border bg-card px-4 py-3 text-sm shadow-sm hover:bg-muted/40"
+          >
+            <FlaskConical className="h-4 w-4 text-muted-foreground" />
+            <span className="flex-1">
+              <span className="block font-semibold uppercase tracking-wide text-muted-foreground">Lab</span>
+              <span className="block text-xs text-muted-foreground">Cache-Statistik, Provider-Status und Technik</span>
+            </span>
+            <ChevronRight className="h-4 w-4 text-muted-foreground" />
+          </Link>
         </SettingsGroup>
       </main>
     </>
@@ -374,24 +387,7 @@ function StationRow({
   onToggle: () => void;
   onMove: (dir: "up" | "down") => void;
 }) {
-  const [q, setQ] = React.useState("");
-  const [results, setResults] = React.useState<Loc[]>([]);
-  const [loading, setLoading] = React.useState(false);
   const [open, setOpen] = React.useState(false);
-
-  React.useEffect(() => {
-    if (q.length < 2) {
-      setResults([]);
-      return;
-    }
-    const t = setTimeout(async () => {
-      setLoading(true);
-      const data = await fetch(`/api/locations?q=${encodeURIComponent(q)}`).then((r) => r.json());
-      setResults(data.locations ?? []);
-      setLoading(false);
-    }, 300);
-    return () => clearTimeout(t);
-  }, [q]);
 
   return (
     <div className={"rounded-xl border border-border p-3 " + (station.enabled ? "" : "bg-muted/30 opacity-60")}>
@@ -445,23 +441,14 @@ function StationRow({
       </div>
       {open && (
         <div className="mt-2">
-          <Input placeholder="Haltestelle bei DB suchen …" value={q} onChange={(e) => setQ(e.target.value)} />
-          {loading && <div className="mt-1 text-xs text-muted-foreground">sucht …</div>}
-          <div className="mt-1 space-y-1">
-            {results.map((r) => (
-              <button
-                key={r.id}
-                onClick={() => {
-                  onResolve(r);
-                  setOpen(false);
-                  setQ("");
-                }}
-                className="block w-full rounded-lg px-2 py-1.5 text-left text-sm hover:bg-muted"
-              >
-                {r.name}
-              </button>
-            ))}
-          </div>
+          <LocationSearch
+            autoFocus
+            placeholder="Haltestelle bei DB suchen …"
+            onPick={(loc) => {
+              onResolve(loc);
+              setOpen(false);
+            }}
+          />
         </div>
       )}
     </div>
@@ -495,22 +482,72 @@ function NewProfile({ onCreate }: { onCreate: (label: string) => void }) {
   );
 }
 
-function AddStation({ first, onAdd }: { first: boolean; onAdd: (name: string) => void }) {
-  const [name, setName] = React.useState("");
+/** Search field over DB's stations: pick one and it is added already resolved. */
+function AddStation({ first, onAdd }: { first: boolean; onAdd: (loc: Loc) => void }) {
   return (
-    <div className="mt-3 flex gap-2">
-      <Input placeholder={first ? "Haltestelle hinzufügen, z. B. Freiburg(Breisgau) Hbf" : "Fallback-Haltestelle hinzufügen …"} value={name} onChange={(e) => setName(e.target.value)} />
-      <Button
-        variant="outline"
-        onClick={() => {
-          if (name.trim()) {
-            onAdd(name.trim());
-            setName("");
-          }
-        }}
-      >
-        <Plus className="h-4 w-4" />
-      </Button>
+    <div className="mt-3">
+      <LocationSearch
+        placeholder={first ? "Haltestelle suchen, z. B. Freiburg Hbf" : "Weitere Haltestelle (Fallback) suchen …"}
+        onPick={onAdd}
+      />
+    </div>
+  );
+}
+
+/** Type a name → DB's matching stations → tap one. */
+function LocationSearch({ placeholder, onPick, autoFocus }: { placeholder: string; onPick: (loc: Loc) => void; autoFocus?: boolean }) {
+  const [q, setQ] = React.useState("");
+  const [results, setResults] = React.useState<Loc[]>([]);
+  const [loading, setLoading] = React.useState(false);
+  const [searched, setSearched] = React.useState("");
+
+  React.useEffect(() => {
+    if (q.trim().length < 2) {
+      setResults([]);
+      return;
+    }
+    const t = setTimeout(async () => {
+      setLoading(true);
+      try {
+        const data = await fetch(`/api/locations?q=${encodeURIComponent(q.trim())}`).then((r) => r.json());
+        // stops only — the search also knows OSM places (streets, buildings), no use as a station
+        setResults(((data.locations ?? []) as Loc[]).filter((l) => (l.type ?? "").toUpperCase() !== "PLACE" && !/^(way|node|relation)\//.test(l.id)));
+      } catch {
+        setResults([]);
+      } finally {
+        setLoading(false);
+        setSearched(q.trim());
+      }
+    }, 300);
+    return () => clearTimeout(t);
+  }, [q]);
+
+  return (
+    <div>
+      <div className="relative">
+        <Input autoFocus={autoFocus} placeholder={placeholder} value={q} onChange={(e) => setQ(e.target.value)} />
+        {loading && <Spinner className="absolute right-3 top-1/2 -translate-y-1/2" />}
+      </div>
+      {results.length > 0 && (
+        <div className="mt-1 space-y-0.5 rounded-xl border border-border p-1">
+          {results.map((r) => (
+            <button
+              key={r.id}
+              type="button"
+              onClick={() => {
+                onPick(r);
+                setQ("");
+                setResults([]);
+              }}
+              className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm hover:bg-muted"
+            >
+              <Plus className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              {r.name}
+            </button>
+          ))}
+        </div>
+      )}
+      {!loading && searched === q.trim() && q.trim().length >= 2 && results.length === 0 && <p className="mt-1 text-xs text-muted-foreground">Nichts gefunden.</p>}
     </div>
   );
 }
