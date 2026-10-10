@@ -1,7 +1,8 @@
 "use client";
 
 import * as React from "react";
-import { Button, Card, Input, Spinner, Switch } from "@/components/ui";
+import { Button, Input, Spinner, Switch } from "@/components/ui";
+import { SettingsSection } from "@/components/SettingsSection";
 
 interface Profile {
   salutation: string;
@@ -31,6 +32,14 @@ export function ClaimantCard() {
   const [ibanMasked, setIbanMasked] = React.useState("");
   const [err, setErr] = React.useState<string | null>(null);
   const [saved, setSaved] = React.useState(false);
+  const [sigRev, setSigRev] = React.useState(0);
+  const [hasSig, setHasSig] = React.useState<boolean | null>(null);
+
+  React.useEffect(() => {
+    fetch("/api/claimant/signature", { method: "HEAD" })
+      .then((r) => setHasSig(r.ok))
+      .catch(() => setHasSig(false));
+  }, [sigRev]);
 
   React.useEffect(() => {
     fetch("/api/claimant")
@@ -41,7 +50,8 @@ export function ClaimantCard() {
       })
       .catch(() => {});
   }, []);
-  if (!p) return null;
+  if (!p || hasSig === null)
+    return <SettingsSection id="fahrgastrechte" title="Fahrgastrechte: deine Daten" state="loading" />;
 
   const field = (k: keyof Profile, placeholder: string, opts: { className?: string; inputMode?: "numeric" | "email" | "tel" } = {}) => (
     <Input
@@ -68,9 +78,20 @@ export function ClaimantCard() {
     setTimeout(() => setSaved(false), 1500);
   }
 
+  // Everything the DB form needs (bank account only for a transfer payout).
+  const missing = [
+    !(p.firstName && p.lastName) && "Name",
+    !(p.street && p.postcode && p.city) && "Adresse",
+    !p.email && "E-Mail",
+    p.payout === "transfer" && !ibanMasked && "IBAN",
+    !hasSig && "Unterschrift",
+  ].filter(Boolean) as string[];
+  const summary = missing.length
+    ? `Fehlt: ${missing.join(", ")}`
+    : `${p.firstName} ${p.lastName} · ${p.payout === "transfer" ? `Überweisung ${ibanMasked}` : "Gutschein"} · Unterschrift ✓`;
+
   return (
-    <Card className="p-4" id="fahrgastrechte">
-      <h2 className="mb-1 text-sm font-semibold uppercase tracking-wide text-muted-foreground">Fahrgastrechte: deine Daten</h2>
+    <SettingsSection id="fahrgastrechte" title="Fahrgastrechte: deine Daten" state={missing.length ? "todo" : "done"} summary={summary}>
       <p className="mb-3 text-xs text-muted-foreground">
         Damit füllt die App das offizielle DB-Formular aus. Wird verschlüsselt auf dem Server gespeichert; die IBAN wird
         nie wieder vollständig angezeigt.
@@ -126,28 +147,20 @@ export function ClaimantCard() {
         )}
         <div className="mt-2 grid gap-2 sm:grid-cols-2">{field("bahnBonusNumber", "BahnBonus-Nummer (nur wenn Punkte eingelöst)")}</div>
       </div>
-      <SignatureField />
+      <SignatureField has={hasSig} rev={sigRev} onChanged={() => setSigRev((r) => r + 1)} />
       {err && <p className="mt-2 text-sm text-danger">{err}</p>}
       <Button className="mt-3" onClick={save}>
         {saved ? "Gespeichert ✓" : "Speichern"}
       </Button>
-    </Card>
+    </SettingsSection>
   );
 }
 
 /** Signature for the form: a photo / screenshot, background removed on the server. */
-function SignatureField() {
-  const [rev, setRev] = React.useState(0);
-  const [has, setHas] = React.useState<boolean | null>(null);
+function SignatureField({ has, rev, onChanged }: { has: boolean; rev: number; onChanged: () => void }) {
   const [busy, setBusy] = React.useState(false);
   const [err, setErr] = React.useState<string | null>(null);
   const fileRef = React.useRef<HTMLInputElement>(null);
-
-  React.useEffect(() => {
-    fetch("/api/claimant/signature", { method: "HEAD" })
-      .then((r) => setHas(r.ok))
-      .catch(() => setHas(false));
-  }, [rev]);
 
   async function upload(file: File) {
     setBusy(true);
@@ -157,7 +170,7 @@ function SignatureField() {
       body.append("file", file);
       const res = await fetch("/api/claimant/signature", { method: "POST", body });
       if (!res.ok) setErr((await res.json().catch(() => ({}))).error ?? "Hochladen fehlgeschlagen");
-      setRev((r) => r + 1);
+      onChanged();
     } catch {
       setErr("Hochladen fehlgeschlagen – keine Verbindung");
     } finally {
@@ -191,7 +204,7 @@ function SignatureField() {
             onClick={async () => {
               if (!confirm("Unterschrift löschen?")) return;
               await fetch("/api/claimant/signature", { method: "DELETE" }).catch(() => {});
-              setRev((r) => r + 1);
+              onChanged();
             }}
           >
             Entfernen

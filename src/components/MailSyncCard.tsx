@@ -1,7 +1,8 @@
 "use client";
 
 import * as React from "react";
-import { Button, Card, Input, Spinner, Switch } from "@/components/ui";
+import { Button, Input, Spinner, Switch } from "@/components/ui";
+import { SettingsSection } from "@/components/SettingsSection";
 import { formatAgo } from "@/lib/time";
 
 interface View {
@@ -62,12 +63,22 @@ export function MailSyncCard() {
   const save = (extra: Record<string, unknown> = {}) =>
     call("save", { ...f, port: Number(f.port) || 993, password: f.password || undefined, ...extra });
 
-  if (!v) return null;
+  const title = "Buchungsmails automatisch abrufen";
+  if (!v) return <SettingsSection id="mails" title={title} state="loading" />;
   const configured = !!(v.config.host && v.config.user && v.hasPassword);
+  const ok = configured && v.config.enabled && v.status.lastOk !== false;
+  const summary = !configured
+    ? "Nicht eingerichtet"
+    : [
+        v.config.enabled ? `alle 15 min aus „${v.config.folder}“` : "automatischer Abruf aus",
+        v.status.lastRunAt && `${v.status.lastOk ? "zuletzt" : "Fehler"} ${formatAgo(v.status.lastRunAt)}`,
+        `${v.status.imported} importiert`,
+      ]
+        .filter(Boolean)
+        .join(" · ");
 
   return (
-    <Card className="p-4">
-      <h2 className="mb-1 text-sm font-semibold uppercase tracking-wide text-muted-foreground">Buchungsmails automatisch abrufen</h2>
+    <SettingsSection id="mails" title={title} state={ok ? "done" : "todo"} summary={summary}>
       <p className="mb-3 text-xs text-muted-foreground">
         Die App liest einen Ordner deines Postfachs (IMAP, nur lesen – nichts wird verschoben, markiert oder gelöscht)
         und übernimmt jede DB-Buchungsbestätigung als Fahrt. Das Passwort wird verschlüsselt gespeichert. Bei GMX/WEB.DE
@@ -190,6 +201,6 @@ export function MailSyncCard() {
         </p>
       )}
       {err && <p className="mt-2 text-sm text-danger">{err}</p>}
-    </Card>
+    </SettingsSection>
   );
 }

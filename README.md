@@ -7,85 +7,142 @@
 
 # Sparpreis-Explorer
 
-Findet günstige Bahn-Tickets für deine Stammstrecke, die man bei bahn.de so nicht angezeigt
-bekommt.
+Findet billige Sparpreise auf genau den Verbindungen, die **wahrscheinlich nicht klappen**,
+und hilft dir, daraus das Beste zu machen.
 
-Die Idee: Ein Sparpreis gilt nur für Verbindungen mit Fernverkehr. Oft reicht aber schon
-**ein kurzes ICE-Stück**, der Rest der Strecke läuft im Nahverkehr, und trotzdem ist alles
-**ein durchgehendes Ticket** zum Sparpreis. Solche Verbindungen sind häufig deutlich billiger
-als die Standardvorschläge der DB. Die App sucht sie gezielt, prüft die echten Preise und
-zeigt dir nur, was tatsächlich buchbar ist.
+Ein Sparpreis gilt nur für die gebuchten Züge (Zugbindung). Diese **Zugbindung entfällt aber,
+sobald absehbar ist, dass du mindestens 20 Minuten später am Ziel ankommst**, zum Beispiel
+weil ein Anschluss platzt. Dann darfst du jeden anderen Zug nehmen, auch einen schnelleren
+ICE. Ab 60 Minuten Verspätung gibt es zusätzlich Geld zurück.
 
-> **Hinweis:** Privates Hobbyprojekt, nicht mit der Deutschen Bahn verbunden. Preise ohne
-> Gewähr, maßgeblich ist die Buchung bei der DB. Das Logo ist nur an die Farben der DB
-> angelehnt.
+Die App schätzt aus echten Ist-Zeiten der letzten Monate für jede Verbindung, **wie oft ihre
+Anschlüsse klappen** und **wie wahrscheinlich du ≥ 20 min zu spät ankommst**. So findest du
+das billigste Ticket mit der besten Chance auf eine freie Zugwahl. Gesucht werden auch
+Verbindungen, die bahn.de so nicht vorschlägt: oft reicht ein kurzes ICE-Stück, der Rest läuft
+im Nahverkehr, und alles ist ein durchgehendes Ticket zum Sparpreis.
 
-## Was die App kann
+> **Hinweis:** Privates Hobbyprojekt, nicht mit der Deutschen Bahn verbunden. Preise und
+> Wahrscheinlichkeiten ohne Gewähr. Ob die Zugbindung aufgehoben ist, entscheidet die
+> tatsächliche Verspätung, nicht die Statistik. Das Logo ist nur an die Farben der DB angelehnt.
 
-**Reisen festhalten und Entschädigung holen**
+## Anschluss-Quote und Flex-Chance
 
-- **Kalender mit all deinen Fahrten:** aus der Suche per „Gebucht“ oder von Hand eingetragen.
-- **Heute-Leiste:** Hast du heute eine Fahrt, zeigt jede Seite oben, in welchem Zug du
-  gerade sitzt und wie es weitergeht.
-- **„Kontrolliert“:** speichert Zeit und Standort einer Fahrkartenkontrolle (beliebig oft
-  pro Fahrt) und ordnet sie dem richtigen Zug zu.
-- **Screenshots und Belege** direkt vom Handy zur Fahrt hochladen, z. B. die
-  Verspätungsprognose aus dem DB Navigator.
-- **Was wirklich passiert ist:** pünktlich, verspätet (mit echter Ankunftszeit),
-  abgebrochen, nicht angetreten oder Zugausfall, dazu wie du tatsächlich gefahren bist.
-- **Fahrgastrechte auf Knopfdruck:** Die App rechnet nach den Regeln der DB aus, was dir
-  zusteht (25 % ab 60 min, 50 % ab 120 min, Erstattung bei Nichtantritt oder Abbruch), und
-  erzeugt das **offizielle DB-Formular fertig ausgefüllt** mit deinen Daten. Du unterschreibst
-  nur noch. Name, Adresse und IBAN liegen verschlüsselt auf dem Server.
+Das Herz der App. Jede Verbindung trägt vorne zwei Werte:
+
+| Wert | Bedeutung | Für die Flex-Suche gut, wenn … |
+|---|---|---|
+| **Anschluss X %** | Wie oft **alle** Umstiege der Verbindung in den letzten Monaten geklappt hätten | **niedrig** |
+| **🎲 Flex Y %** | Geschätzte Chance, **≥ 20 min später** am Ziel zu sein: Zugbindung aufgehoben | **hoch** |
+
+Die Anschluss-Quote ist farbig markiert, je eher etwas platzt, desto auffälliger:
+
+- 🔴 **unter 5 %:** klappt so gut wie nie
+- 🟢 **unter 10 %:** kräftiges Grün
+- 🟢 **unter 15 %:** mittleres Grün
+- 🟢 **unter 25 %:** dunkles Grün
+- ⚪ **darüber:** grau
+
+So entstehen die Zahlen:
+
+- **Pro Umstieg** steht im Fahrtverlauf, wie oft er verpasst worden wäre („**N % weg**“).
+  Gerechnet wird mit der geplanten Umstiegszeit, der Verspätungsverteilung des ankommenden
+  Zugs und damit, wie pünktlich der Anschlusszug selbst abfährt. Auch der Takt zählt: Bei
+  einer Linie, die alle 10 min fährt, kostet ein verpasster Anschluss kaum Zeit.
+- **Die Flex-Chance** setzt sich aus verpassten Anschlüssen, Zugausfällen und der Verspätung
+  des letzten Zugs zusammen.
+- **Die Datenbasis** ist so genau wie möglich: erst die Zugnummer, sonst die Linie zur selben
+  Uhrzeit, dann die Linie, zuletzt der Bahnhof. Ältere Monate zählen weniger, dieselbe
+  Jahreszeit und derselbe Wochentag können stärker gewichtet werden.
+- **Nur Umstiege im Ticket zählen:** Oft gilt der Sparpreis nur für einen Teil der Strecke
+  („Gilt nur für …“), etwa ohne die Straßenbahn am Anfang. Ein Umstieg außerhalb des Tickets
+  hebt keine Zugbindung auf und ist ungeschützt. Die App liest den echten Geltungsbereich bei
+  der DB aus, markiert solche Abschnitte („nicht im Ticket“) und warnt vor knappen
+  ungeschützten Umstiegen, je nach Verkehrsmittel: nach Tram und U-Bahn unter 3 min, nach
+  Bussen unter 7 min, nach Zügen unter 10 min. Fehlt ein Zug im Ticket, ist die Verbindung rot
+  und fliegt aus der Liste (außer das Deutschland-Ticket deckt den Nahverkehr ab).
+
+Die Daten stammen aus dem offenen Datensatz
+[piebro/deutsche-bahn-data](https://huggingface.co/datasets/piebro/deutsche-bahn-data) und
+werden unter **Einstellungen → Pünktlichkeit** einmal geladen und ausgewertet. Die Suche
+selbst lädt dafür nichts nach.
+
+## Flex-Tag: der günstigste Flex-Preis eines Tages
+
+Der Modus für die eigentliche Jagd. In der Suche **„Ganzer Tag: günstigste
+Flex-Verbindung“** einschalten und ein Datum wählen:
+
+1. Die App sucht den ganzen Tag ab 05 Uhr in **6 Zeitfenstern** nacheinander (schont die
+   DB-Schnittstellen, dauert ein paar Minuten).
+2. Sie nimmt nur Tickets mit **genau einem Fernverkehrs-Abschnitt**: das kurze ICE-Stück,
+   das den Sparpreis möglich macht.
+3. Vorab wird ausgesiebt: **Min. Flex-Chance** und **Max. Anschluss-Quote** (beides im
+   Filter) bestimmen schon, welche Kandidaten überhaupt einen Preis abfragen.
+4. Das Ergebnis ist **nach Preis gruppiert**: je Preis eine Zeile pro Verbindung mit
+   Anschluss- und Flex-Wert ganz vorne. Bei gleichem Preis steht die Verbindung zuerst, die
+   eher platzt (niedrigere Anschluss-Quote, dann höhere Flex-Chance).
+5. Antippen öffnet die Details, **„Bei DB prüfen“** öffnet genau dieses Ticket auf bahn.de
+   (mit Zwischenhalten und BahnCard), dort buchen.
+
+Gezeigt werden nur Züge des gesuchten Tages. Die Sortierung **🎯 Günstig & oft Flex** zeigt
+außerdem nur die Verbindungen, die nicht von einer billigeren *und* flexibleren geschlagen
+werden; **🎲 Unzuverlässigste** sortiert rein nach Flex-Chance.
+
+**Früher aussteigen:** Suchst du ein Ziel, das unterwegs auf einer schon gesuchten Strecke
+liegt, zeigt die App passende Tickets aus diesen Suchen gleich mit, ohne neue Abfragen
+(„🚪 Ticket bis X, du steigst in Y aus“). Fahrgastrechte zählen dabei am Ticketziel.
+
+## Was die App sonst kann
 
 **Günstige Tickets finden**
 
 - **Günstigere Alternativen zu deiner Wunschverbindung:** Du wählst eine Verbindung als
   Referenz, die App sucht alle billigeren Varianten mit denselben ersten Zügen.
-- **Echte Sparpreise:** Jeder angezeigte Preis kommt direkt von der DB, inklusive BahnCard,
-  Klasse und Deutschland-Ticket aus deinen Einstellungen.
-- **Nur gültige Tickets:** Ein grüner Haken bedeutet: ein Ticket für die ganze Strecke.
-- **„Bei DB prüfen“:** öffnet die Verbindung vorausgefüllt auf bahn.de zum Buchen.
+- **Echte Sparpreise:** Jeder Preis kommt direkt von der DB, inklusive BahnCard, Klasse und
+  Deutschland-Ticket aus deinen Einstellungen. Auch Pro-Forma-Preise über Zwischenhalte.
+- **Nur gültige Tickets:** Ein grüner Haken bedeutet: Das Ticket deckt alle Züge der
+  Verbindung ab.
 - **Kalender:** zeigt den günstigsten Preis pro Tag.
-- **Umstiege im Blick:** knappe Umstiege sind rot markiert, Fußwege und echte Wartezeiten
-  stehen im Fahrtverlauf.
-- **Pünktlichkeit aus echten Daten:** wie oft Anschlüsse in den letzten Monaten geklappt
-  haben und wie wahrscheinlich du ≥ 20 min zu spät ankommst (siehe unten).
-- **Filter und Sortierung:** Preis, Dauer, Umstiege, ICE-Anteil, „Nur Original (DB)“,
-  Ankunfts- statt Abfahrtszeit, „Unzuverlässigste zuerst“ und mehr.
+- **Filter und Sortierung:** Preis, Dauer, Umstiege, ICE-Anteil, Fernverkehrs-Abschnitte,
+  Flex-Chance, Anschluss-Quote, Ankunfts- statt Abfahrtszeit und mehr.
 - **Teilen:** Die komplette Ansicht steckt in der URL, ein Link zeigt genau das, was du siehst.
-- **Merken und Vergleichen** einzelner Verbindungen.
 - **Wird mit der Zeit besser:** Die App merkt sich Strecken, Umstiegsbahnhöfe und Preise
   deiner Suchen und findet auf der Stammstrecke schneller Treffer.
 
+**Reisen festhalten und Entschädigung holen**
+
+- **Kalender mit all deinen Fahrten:** aus der Suche per „Gebucht“, von Hand, automatisch aus
+  den Buchungsmails (IMAP) oder aus deinem **DB-Kundenkonto** (inklusive Preis je Richtung
+  bei Hin- und Rückfahrt).
+- **Echte Zeiten jeder Fahrt:** Die App verfolgt deine Züge am Reisetag live (ab Abfahrt
+  alle 10 min) und ergänzt später die offiziellen Ist-Zeiten aus den Open Data. Selbst
+  gemessene Werte bleiben immer erhalten, auch wenn die DB ihre Daten nachträglich ändert.
+- **Heute-Leiste:** Hast du heute eine Fahrt, zeigt jede Seite oben, in welchem Zug du
+  gerade sitzt und wie es weitergeht.
+- **„Kontrolliert“:** speichert Zeit und Standort einer Fahrkartenkontrolle und hält fest,
+  zwischen welchen Halten der Zug gerade war und wie viel Verspätung er hatte.
+- **Screenshots und Belege** direkt vom Handy zur Fahrt hochladen.
+- **Fahrgastrechte auf Knopfdruck:** Die App rechnet nach den Regeln der DB aus, was dir
+  zusteht (25 % ab 60 min, 50 % ab 120 min, Erstattung bei Nichtantritt oder Abbruch). Sie
+  erzeugt das **offizielle DB-Formular fertig ausgefüllt und unterschrieben** oder reicht den
+  Antrag **direkt online über dein DB-Konto** ein. Name, Adresse, IBAN und Zugangsdaten liegen
+  verschlüsselt auf dem Server.
+
 ## So benutzt du sie
 
-1. **Stammstrecke einrichten:** In den Einstellungen Start und Ziel eintragen. Pro Seite
-   kannst du mehrere Bahnhöfe anlegen (z. B. einen Hauptbahnhof als Ausweich-Start),
-   sortieren und einzeln abschalten.
-2. **Suchen:** Datum und Zeitfenster wählen. Du siehst zuerst die normalen DB-Verbindungen.
+1. **Einrichten:** Unter **Einstellungen** BahnCard und Klasse wählen, unter **Start & Ziele**
+   deine Orte mit ihren Haltestellen anlegen (pro Ort mehrere, z. B. ein Hauptbahnhof als
+   Ausweich-Start) und unter **Pünktlichkeit** die Daten laden. Fertig eingerichtete
+   Bereiche klappen sich zu, offene Punkte sind markiert.
+2. **Flex-Tag suchen:** „Ganzer Tag“ einschalten, Datum wählen, warten, das günstigste
+   Ticket mit niedriger Anschluss-Quote nehmen (siehe oben).
+3. **Oder normal suchen:** Datum und Zeitfenster wählen.
    - **Schnell:** nutzt vor allem den Cache, sofort Ergebnisse
    - **Gründlich:** Standard, sucht kurze ICE-Stücke und Alternativen
    - **Tiefensuche:** systematisch über mehrere Zeitfenster, dauert länger
-3. **Referenz wählen:** Bei deiner Wunschverbindung auf **„Als Referenz“** tippen. Die App
-   sucht dann alle günstigeren Alternativen, die mit denselben Zügen starten.
-4. **Buchen:** Mit **„Bei DB prüfen“** die Verbindung auf bahn.de öffnen und dort buchen.
-
-### Pünktlichkeit
-
-Unter **Einstellungen → Pünktlichkeit** lädt ein Knopfdruck die echten Ist-Zeiten
-vergangener Monate für die Bahnhöfe deiner Strecken. Du wählst, wie viele Monate zählen
-und ob dieselbe Jahreszeit aus den Vorjahren dazukommt. Die Daten werden einmal
-ausgewertet und gespeichert, die Suche selbst lädt nichts nach.
-
-Danach zeigt jede Verbindung:
-
-- **Anschluss X %:** wie oft alle Umstiege geklappt hätten
-- **N % weg:** pro Umstieg, wie oft der Anschluss verpasst worden wäre
-- **🎲 Flex Y %:** geschätzte Chance, ≥ 20 min zu spät anzukommen. Dann ist beim Sparpreis
-  die Zugbindung aufgehoben und du darfst einen anderen Zug nehmen.
-
-Das sind Statistiken über die Vergangenheit, keine Vorhersage für einen konkreten Zug.
+4. **Buchen:** Mit **„Bei DB prüfen“** das Ticket auf bahn.de öffnen und dort buchen, danach
+   in der App als „Gebucht“ markieren (oder die Buchungsmail kommt von selbst).
+5. **Unterwegs:** Die App verfolgt die Fahrt. Platzt ein Anschluss, siehst du es sofort, und
+   nach der Reise ist der Entschädigungsantrag einen Knopfdruck entfernt.
 
 ## Installation
 
@@ -97,6 +154,7 @@ cd sparpreis-explorer
 npm install
 python3 -m venv .venv && .venv/bin/pip install curl_cffi duckdb
 cp .env.example .env
+npx playwright install --with-deps chromium   # nur für die Anbindung des DB-Kundenkontos
 ```
 
 In der `.env` mindestens diese zwei Werte setzen, sonst kann sich niemand einloggen:
@@ -118,6 +176,8 @@ npm run start             # http://localhost:3005
 ```bash
 docker compose up -d --build   # http://localhost:3005, Daten im Volume "bahnfinder-data"
 ```
+
+(Das Docker-Image enthält keinen Browser; die Anbindung des DB-Kundenkontos geht dort nicht.)
 
 Zum Ausprobieren ganz ohne Netzabfragen gibt es Demodaten:
 `ROUTING_PROVIDER=mock` und `DB_VENDO_MODE=mock` in der `.env`.
@@ -153,7 +213,7 @@ npm run view -- '<geteilter Link>'   # zeigt eine geteilte Ansicht im Terminal a
 
 - Fahrpläne: [Transitous](https://transitous.org) (MOTIS)
 - Preise: DB-Schnittstellen über [db-vendo-client](https://github.com/public-transport/db-vendo-client)
-- Pünktlichkeit: [piebro/deutsche-bahn-data](https://huggingface.co/datasets/piebro/deutsche-bahn-data)
+- Pünktlichkeit und Ist-Zeiten: [piebro/deutsche-bahn-data](https://huggingface.co/datasets/piebro/deutsche-bahn-data)
   (Deutsche Bahn, CC BY 4.0)
 
 Code unter [MIT-Lizenz](LICENSE) © 2026 TomlDev

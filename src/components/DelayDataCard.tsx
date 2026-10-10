@@ -1,7 +1,8 @@
 "use client";
 
 import * as React from "react";
-import { Badge, Button, Card, ProgressBar, Spinner, Switch } from "@/components/ui";
+import { Badge, Button, ProgressBar, Spinner, Switch } from "@/components/ui";
+import { SettingsSection } from "@/components/SettingsSection";
 import { FULL_COVERAGE_FROM, planMonths, type AvailableMonth } from "@/lib/delay/plan";
 import { DEFAULT_BUILD_PARAMS, type DelayBuildParams, type DelayWeights } from "@/lib/delay/types";
 import { formatAgo } from "@/lib/time";
@@ -137,11 +138,18 @@ export function DelayDataCard() {
         : job.index;
   const progress = job ? done / Math.max(1, job.months.length) : 0;
 
+  // Without data there are no Anschluss / Flex numbers — the heart of the search.
+  const state = !st ? "loading" : running || !st.active || job?.stage === "failed" ? "todo" : "done";
+  const summary = !st
+    ? null
+    : running
+      ? "Lädt gerade …"
+      : st.active
+        ? `${st.active.months.length} Monate · ${st.active.stations} Bahnhöfe · ${st.active.finishedAt ? formatAgo(st.active.finishedAt) : ""}${st.relevant.missing > 0 ? ` · ${st.relevant.missing} neue Bahnhöfe ohne Daten` : ""}`
+        : "Noch keine Daten – Anschluss- und Flex-Quoten fehlen";
+
   return (
-    <Card className="p-4">
-      <h2 className="mb-1 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-        Pünktlichkeit (Open Data)
-      </h2>
+    <SettingsSection id="puenktlichkeit" title="Pünktlichkeit (Open Data)" state={state} summary={summary}>
       <p className="mb-3 text-xs text-muted-foreground">
         Lädt echte Ist-Zeiten vergangener Monate für die Bahnhöfe deiner Strecken und speichert kompakte Statistiken.
         Daraus schätzt die Suche pro Verbindung, wie wahrscheinlich Anschlüsse klappen und wie oft man ≥ 20 min zu spät
@@ -319,6 +327,6 @@ export function DelayDataCard() {
         </a>{" "}
         (Deutsche Bahn Timetables API, Lizenz CC BY 4.0).
       </p>
-    </Card>
+    </SettingsSection>
   );
 }

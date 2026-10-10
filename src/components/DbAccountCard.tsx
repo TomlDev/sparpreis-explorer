@@ -1,7 +1,8 @@
 "use client";
 
 import * as React from "react";
-import { Button, Card, Input, Spinner } from "@/components/ui";
+import { Button, Input, Spinner } from "@/components/ui";
+import { SettingsSection } from "@/components/SettingsSection";
 import { formatAgo } from "@/lib/time";
 
 interface View {
@@ -34,7 +35,7 @@ export function DbAccountCard() {
       .then(apply)
       .catch(() => {});
   }, []);
-  if (!v) return null;
+  if (!v) return <SettingsSection id="db-konto" title="DB-Kundenkonto" state="loading" />;
 
   async function call(action: string, body: Record<string, unknown> = {}) {
     setBusy(action);
@@ -56,9 +57,14 @@ export function DbAccountCard() {
   }
 
   const s = v.status;
+  const ok = !!(v.user && v.hasPassword) && s.lastOk !== false;
+  const summary = !(v.user && v.hasPassword)
+    ? "Nicht verbunden"
+    : s.lastRunAt
+      ? `${s.lastOk ? "Abgeglichen" : "Fehler"} ${formatAgo(s.lastRunAt)}${s.unknown.length ? ` · ${s.unknown.length} Buchung(en) nicht in der App` : ""}`
+      : "Noch nicht abgeglichen";
   return (
-    <Card className="p-4" id="db-konto">
-      <h2 className="mb-1 text-sm font-semibold uppercase tracking-wide text-muted-foreground">DB-Kundenkonto</h2>
+    <SettingsSection id="db-konto" title="DB-Kundenkonto" state={ok ? "done" : "todo"} summary={summary}>
       <p className="mb-3 text-xs text-muted-foreground">
         Die App meldet sich einmal am Tag bei bahn.de an und liest „Meine Reisen“: Preis je Richtung bei Hin- und Rückfahrt und
         Buchungen, die noch nicht in der App sind. Das Passwort wird verschlüsselt auf dem Server gespeichert und nie wieder
@@ -121,6 +127,6 @@ export function DbAccountCard() {
           </ul>
         </div>
       )}
-    </Card>
+    </SettingsSection>
   );
 }
