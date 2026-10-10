@@ -28,7 +28,7 @@
     "lucide-react": "^0.474.0",
     "mailauth": "^7.1.0",
     "mailparser": "^3.9.33",
-    "next": "^16.3.6",
+    "next": "^16.3.8",
     "pdf-lib": "^1.17.1",
     "playwright": "^1.63.0",
     "react": "^19.0.0",
