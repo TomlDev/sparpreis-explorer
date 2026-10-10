@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { TripLeg } from "@/db/schema";
-import { activeLegs, findStop, matchDeparture } from "@/lib/trips/live";
+import { activeLegs, discoveryLegs, dueLegs, findStop, forecastLegs, matchDeparture } from "@/lib/trips/live";
 
 const leg = (o: Partial<TripLeg>): TripLeg => ({
   product: "nationalExpress",
@@ -25,6 +25,26 @@ describe("Live-Daten am Reisetag", () => {
     expect(activeLegs(late, at("2026-10-10T12:40:00Z"))).toEqual([0]);
     // final open data → nothing to do
     expect(activeLegs([leg({ rt: { final: true, source: "opendata", checkedAt: 1 } })], at("2026-10-10T11:00:00Z"))).toEqual([]);
+  });
+
+  it("beobachtet ab 1 h vor Abfahrt des Zuges an seinem Startbahnhof (nicht erst vor dem Einstieg)", () => {
+    // ICE starts 3 h before it reaches Mannheim
+    const live = { final: false, source: "live" as const, checkedAt: at("2026-10-10T08:00:00Z"), runStart: "2026-10-10T08:07:00.000Z" };
+    const legs = [leg({ rtLive: live })];
+    expect(activeLegs(legs, at("2026-10-10T07:00:00Z"))).toEqual([]);
+    expect(activeLegs(legs, at("2026-10-10T07:10:00Z"))).toEqual([0]);
+  });
+
+  it("schlägt jeden Zug 3 h vor der Fahrt einmal nach, danach nur noch nach Plan", () => {
+    const legs = [leg({}), leg({ lineName: "RE 2", product: "regionalExpress", plannedDeparture: "2026-10-10T11:50:00.000Z", plannedArrival: "2026-10-10T12:30:00.000Z" })];
+    expect(discoveryLegs(legs, at("2026-10-10T08:00:00Z"))).toEqual([]);
+    expect(discoveryLegs(legs, at("2026-10-10T08:10:00Z"))).toEqual([0, 1]);
+    expect(dueLegs(legs, at("2026-10-10T08:10:00Z"))).toEqual([0, 1]);
+    const seen = legs.map((l) => ({ ...l, rtLive: { final: false, source: "live" as const, checkedAt: at("2026-10-10T08:10:00Z"), runStart: l.plannedDeparture } }));
+    expect(dueLegs(seen, at("2026-10-10T08:30:00Z"))).toEqual([]);
+    // forecast mode (trip not marked "Nehme ich"): every train every 15 min
+    expect(forecastLegs(seen, at("2026-10-10T08:20:00Z"))).toEqual([]);
+    expect(forecastLegs(seen, at("2026-10-10T08:26:00Z"))).toEqual([0, 1]);
   });
 
   it("findet den Zug auf der Abfahrtstafel über Minute + Nummer oder Linie", () => {

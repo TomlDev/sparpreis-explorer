@@ -7,6 +7,7 @@ import { ArrowLeft, Camera, FileDown, FileText, MapPin, Pencil, ShieldCheck, Sti
 import { AppHeader } from "@/components/AppHeader";
 import { Badge, Button, Card, Input, Spinner } from "@/components/ui";
 import { EventDialog } from "@/components/trips/EventDialog";
+import { ForecastCard } from "@/components/trips/ForecastCard";
 import { STATUS, legColor, legLabel, mapsLink, uploadFiles } from "@/components/trips/tripUi";
 import type { AttachmentRow, ClaimRow, TripEventRow, TripRow } from "@/db/schema";
 import { berlinDay, berlinToIso, formatTime, todayLocal } from "@/lib/time";
@@ -255,6 +256,8 @@ export default function TripPage() {
             </div>
           )}
         </Card>
+
+        <ForecastCard key={`${t.id}|${t.status}|${t.plan}`} t={t} />
 
         {/* Quick actions */}
         <div className="flex flex-wrap gap-2">

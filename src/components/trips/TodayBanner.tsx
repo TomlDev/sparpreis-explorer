@@ -6,6 +6,7 @@ import { Camera, Check, ChevronRight, ShieldCheck, TrainFront } from "lucide-rea
 import type { TripRow } from "@/db/schema";
 import { Button, Spinner, buttonClass } from "@/components/ui";
 import { formatTime } from "@/lib/time";
+import { forecastText, tripForecast } from "@/lib/trips/forecast";
 import { cn } from "@/lib/utils";
 import { legLabel, logControl, uploadFiles } from "./tripUi";
 
@@ -111,6 +112,8 @@ export function TodayBanner() {
         {visible.map(({ trip: t, phase, legIndex, nextIndex }) => {
           const leg = legIndex != null ? t.legs[legIndex] : null;
           const next = nextIndex != null ? t.legs[nextIndex] : null;
+          const fc = phase !== "after" && t.status === "planned" ? tripForecast(t.legs, t.reroute) : null;
+          const dest = t.destName;
           return (
             <div key={t.id} className="flex flex-col gap-1.5 text-sm sm:flex-row sm:items-center sm:gap-3">
               <div className="flex min-w-0 flex-1 items-start gap-2">
@@ -142,6 +145,16 @@ export function TodayBanner() {
                   <span>
                     <b>Wie lief die Fahrt</b> {formatTime(t.plannedDeparture)} {t.originName} → {t.destName}?
                   </span>
+                )}
+                {fc && (fc.level === "lifted" || fc.level === "late" || fc.level === "check" || !!fc.breakAt) && (
+                  <Link
+                    href={`/reisen/${t.id}#ersatz`}
+                    className={cn("mt-0.5 block font-medium", fc.level === "lifted" ? "text-danger" : "text-warning")}
+                  >
+                    {fc.level === "lifted" ? "⚠ " : fc.level === "check" ? "🔎 " : "⏱ "}
+                    {forecastText(fc, dest)}
+                    {fc.level === "lifted" && t.plan !== "take" && <span className="underline"> · Ersatz wählen</span>}
+                  </Link>
                 )}
               </div>
               </div>

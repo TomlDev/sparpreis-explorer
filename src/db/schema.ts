@@ -560,8 +560,30 @@ export interface LegRealtime {
   checkedAt: number;
   /** DB trip id of the train (live lookups reuse it). */
   tripId?: string | null;
+  /** Planned departure of the train at its first station (it's watched from an hour before). */
+  runStart?: string | null;
   /** Combined value only: what DB's data says now where it differs from what we saw live. */
   dbLater?: { dep?: string | null; arr?: string | null } | null;
+}
+
+/**
+ * A connection of the trip breaks (missed / cancelled): the fastest journey from
+ * there to the ticket's destination, from DB's live timetable. Its delay at the
+ * destination — not the broken connection itself — decides the Zugbindung.
+ */
+export interface RerouteCheck {
+  /** which break: index of the leg that can't be taken as booked */
+  breakLeg: number;
+  from: string;
+  /** earliest departure there (arrival of the late train / now) */
+  after: string;
+  /** best arrival at the ticket's destination (null: no connection found) */
+  arrival: string | null;
+  /** vs. the booked arrival there */
+  delayMin: number | null;
+  /** trains of the best alternative, e.g. "RE 7 → ICE 279" */
+  via: string | null;
+  checkedAt: number;
 }
 
 /** What the ticket itself says (from the DB ticket PDF / booking mail). */
@@ -624,6 +646,8 @@ export const trips = sqliteTable(
     plan: text("plan"),
     /** Replacement journey on the ticket of that trip (which then has status "moved"). */
     movedFrom: text("moved_from"),
+    /** When a connection breaks: the fastest way on from there (decides whether the Zugbindung goes). */
+    reroute: text("reroute", { mode: "json" }).$type<RerouteCheck>(),
     createdAt: integer("created_at").notNull(),
     updatedAt: integer("updated_at").notNull(),
   },

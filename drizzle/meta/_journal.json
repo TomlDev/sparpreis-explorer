@@ -71,6 +71,13 @@
       "when": 1791660318225,
       "tag": "0009_tan_sphinx",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1791663858601,
+      "tag": "0010_bizarre_ultimatum",
+      "breakpoints": true
     }
   ]
 }

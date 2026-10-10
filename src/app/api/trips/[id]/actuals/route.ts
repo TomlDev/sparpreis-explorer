@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { ensureReady } from "@/lib/bootstrap";
 import { fetchActuals } from "@/lib/trips/actuals";
-import { activeLegs, refreshLive } from "@/lib/trips/live";
+import { activeLegs, afterMeasure, refreshLive } from "@/lib/trips/live";
 import { getTrip } from "@/lib/trips/repo";
 import { todayLocal } from "@/lib/time";
 
@@ -21,6 +21,7 @@ export async function POST(_req: Request, { params }: Ctx) {
       return NextResponse.json({ error: "Gerade fährt kein Zug dieser Fahrt – Live-Daten ab einer Stunde vor Abfahrt." }, { status: 400 });
     try {
       await refreshLive(trip, Date.now(), true);
+      await afterMeasure(id);
       return NextResponse.json({ trip: getTrip(id) });
     } catch (e) {
       return NextResponse.json({ error: `Live-Daten nicht verfügbar: ${(e as Error).message}` }, { status: 502 });

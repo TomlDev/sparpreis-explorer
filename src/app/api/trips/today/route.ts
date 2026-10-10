@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { ensureReady } from "@/lib/bootstrap";
+import { tripForecast } from "@/lib/trips/forecast";
 import { planStates } from "@/lib/trips/plan";
 import { currentTrips, legAt } from "@/lib/trips/repo";
 
@@ -10,9 +11,11 @@ export async function GET() {
   ensureReady();
   const nowMs = Date.now();
   const current = currentTrips(nowMs);
-  // Not the spare of a double booking, nor one not taken (the live tracking still records it).
+  // Not the spare of a double booking, nor one not taken (the live tracking still records it) —
+  // unless the spare's Zugbindung just went: then its ticket is free for another train.
   const plans = planStates(current);
-  const trips = current.filter((t) => plans.get(t.id)?.state !== "skip").map((t) => {
+  const freed = (t: (typeof current)[number]) => t.status === "planned" && t.plan !== "take" && tripForecast(t.legs, t.reroute).level === "lifted";
+  const trips = current.filter((t) => plans.get(t.id)?.state !== "skip" || freed(t)).map((t) => {
     const dep = t.plannedDeparture ? new Date(t.plannedDeparture).getTime() : null;
     const arr = t.plannedArrival ? new Date(t.plannedArrival).getTime() : null;
     // A train announced late is still under way after its planned arrival.

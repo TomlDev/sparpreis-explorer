@@ -9,6 +9,8 @@ import { todayLocal } from "@/lib/time";
 import { updateTrip } from "./repo";
 import { normalizeLeg, withRealtime } from "./realtime";
 import { isRailLeg } from "./rules";
+import { checkForecastAlert, isFlexible } from "./forecastAlerts";
+import { checkReroute } from "./reroute";
 
 /**
  * Live actual times on the travel day: for the trains running right now, ask
@@ -16,19 +18,24 @@ import { isRailLeg } from "./rules";
  * cancellations. The open data replaces these the next day (final values).
  */
 
-const BEFORE_MIN = 60; // start watching a train an hour before it leaves …
+const BEFORE_MIN = 60; // start watching a train an hour before it leaves its first station …
 const AFTER_MIN = 30; // … until half an hour after its planned arrival
 const EVERY_MS = 10 * 60_000; // regular measurement while a train is watched
 const TICK_MS = 60_000; // the scheduler looks every minute what is due
+// Trips not marked "Nehme ich" (and replacement journeys): every train of the trip
+// from 3 h before departure, every 15 min — to see early when the Zugbindung goes.
+const FORECAST_BEFORE_MIN = 180;
+const FORECAST_EVERY_MS = 15 * 60_000;
 
 const norm = (s: string) => s.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]/g, "").replace(/hauptbahnhof/g, "hbf");
 const ms = (iso: string | null | undefined) => (iso ? new Date(iso).getTime() : NaN);
 
-/** Legs whose train is running (or about to) at `now`. */
+/** Legs whose train is running (or about to) at `now` — from an hour before it leaves its first station. */
 export function activeLegs(legs: TripLeg[], now = Date.now()): number[] {
   return legs.flatMap((l, i) => {
     if (!isRailLeg(l) || normalizeLeg(l).rtOpen?.final) return [];
-    const dep = ms(l.plannedDeparture);
+    const runStart = ms(normalizeLeg(l).rtLive?.runStart);
+    const dep = Math.min(ms(l.plannedDeparture), Number.isFinite(runStart) ? runStart : Infinity);
     const arr = ms(l.plannedArrival ?? l.plannedDeparture);
     const delay = Math.max(0, (ms(l.rt?.arr) || arr) - arr); // keep watching a late train
     return now >= dep - BEFORE_MIN * 60_000 && now <= arr + delay + AFTER_MIN * 60_000 ? [i] : [];
@@ -41,7 +48,7 @@ export function activeLegs(legs: TripLeg[], now = Date.now()): number[] {
  * of departure / arrival is captured, not up to 10 minutes later.
  */
 export function dueLegs(legs: TripLeg[], now = Date.now()): number[] {
-  return activeLegs(legs, now).filter((i) => {
+  return [...new Set([...discoveryLegs(legs, now), ...activeLegs(legs, now)])].filter((i) => {
     const live = normalizeLeg(legs[i]).rtLive;
     if (!live) return true;
     const last = live.checkedAt;
@@ -50,6 +57,34 @@ export function dueLegs(legs: TripLeg[], now = Date.now()): number[] {
     const arr = ms(live.arr ?? legs[i].plannedArrival);
     return (last < dep && now >= dep) || (last < arr && now >= arr);
   });
+}
+
+/**
+ * First lookup of every train of a trip, 3 h before the trip starts: only then
+ * is known when the train leaves its first station (→ watched from an hour before).
+ */
+export function discoveryLegs(legs: TripLeg[], now = Date.now()): number[] {
+  const rail = legs.map((l, i) => ({ l: normalizeLeg(l), i })).filter(({ l }) => isRailLeg(l));
+  if (!rail.length || now < ms(rail[0].l.plannedDeparture) - FORECAST_BEFORE_MIN * 60_000) return [];
+  return rail.filter(({ l }) => !l.rtLive && !l.rtOpen?.final && now <= ms(l.plannedArrival ?? l.plannedDeparture) + AFTER_MIN * 60_000).map(({ i }) => i);
+}
+
+/**
+ * Forecast mode: all rail legs still to come (not only those about to run), each
+ * at most every 15 min, from 3 h before the trip's first train.
+ */
+export function forecastLegs(legs: TripLeg[], now = Date.now()): number[] {
+  const rail = legs.map((l, i) => ({ l: normalizeLeg(l), i })).filter(({ l }) => isRailLeg(l));
+  if (!rail.length || now < ms(rail[0].l.plannedDeparture) - FORECAST_BEFORE_MIN * 60_000) return [];
+  return rail
+    .filter(({ l }) => {
+      if (l.rtOpen?.final) return false;
+      const arr = ms(l.plannedArrival ?? l.plannedDeparture);
+      const late = Math.max(0, (ms(l.rt?.arr) || arr) - arr);
+      if (now > arr + late + AFTER_MIN * 60_000) return false; // already over
+      return !l.rtLive || now - l.rtLive.checkedAt >= FORECAST_EVERY_MS;
+    })
+    .map(({ i }) => i);
 }
 
 /** The leg's train on a departure board: same planned minute and number / line. */
@@ -117,12 +152,14 @@ async function liveRt(leg: TripLeg): Promise<LegRealtime | null> {
     source: "live",
     checkedAt: Date.now(),
     tripId,
+    runStart: run.stops.find((x) => !x.cancelled)?.plannedDeparture ?? run.stops[0]?.plannedDeparture ?? null,
   };
 }
 
 /** Refresh the running trains of one trip (only what is due, unless `all`). Returns true when something changed. */
 export async function refreshLive(trip: TripRow, now = Date.now(), all = false): Promise<boolean> {
-  const active = all ? activeLegs(trip.legs, now) : dueLegs(trip.legs, now);
+  const watch = isFlexible(trip) || (trip.status === "planned" && !!trip.movedFrom);
+  const active = [...new Set([...(all ? activeLegs(trip.legs, now) : dueLegs(trip.legs, now)), ...(watch ? forecastLegs(trip.legs, now) : [])])];
   if (!active.length) return false;
   const legs = [...trip.legs];
   let changed = false;
@@ -141,6 +178,22 @@ export async function refreshLive(trip: TripRow, now = Date.now(), all = false):
   return changed;
 }
 
+/**
+ * After measuring: a broken connection → check the fastest way on (decides the
+ * Zugbindung), then keep a crossed line as evidence on the trip.
+ */
+export async function afterMeasure(tripId: string): Promise<void> {
+  try {
+    let t = db.select().from(trips).where(eq(trips.id, tripId)).get();
+    if (!t) return;
+    const check = await checkReroute(t);
+    if (check && check !== t.reroute) t = { ...t, reroute: check };
+    if (isFlexible(t) || (t.status === "planned" && !!t.movedFrom)) checkForecastAlert(t);
+  } catch (e) {
+    console.error("[forecast]", (e as Error).message);
+  }
+}
+
 declare global {
   // eslint-disable-next-line no-var
   var __liveTimer: ReturnType<typeof setInterval> | undefined;
@@ -157,7 +210,11 @@ export function startLivePolling(): void {
       const today = todayLocal();
       const yesterday = new Date(Date.now() - 86_400_000).toLocaleDateString("sv-SE", { timeZone: "Europe/Berlin" });
       const list = db.select().from(trips).where(or(eq(trips.date, today), eq(trips.date, yesterday))).all();
-      for (const t of list) if (t.status === "planned" || t.status === "delayed") await refreshLive(t);
+      for (const t of list)
+        if (t.status === "planned" || t.status === "delayed") {
+          await refreshLive(t);
+          await afterMeasure(t.id);
+        }
     } catch (e) {
       console.error("[live]", (e as Error).message);
     } finally {

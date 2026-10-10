@@ -108,6 +108,7 @@ export function createTrip(input: TripInput): TripRow {
     notes: input.notes ?? null,
     plan: null,
     movedFrom: input.movedFrom ?? null,
+    reroute: null,
     createdAt: now(),
     updatedAt: now(),
   };
@@ -164,6 +165,7 @@ const EDITABLE = [
   "notes",
   "legs",
   "plan",
+  "reroute",
 ] as const;
 type Editable = (typeof EDITABLE)[number];
 
@@ -202,7 +204,6 @@ export function moveTrip(id: string, opts: { date: string; targetId?: string | n
   const from = db.select().from(trips).where(eq(trips.id, id)).get();
   if (!from) throw new Error("Fahrt nicht gefunden");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(opts.date)) throw new Error("Datum fehlt");
-  if (from.movedFrom) throw new Error("Das ist schon eine Ersatzfahrt");
   const existing = db.select().from(trips).where(eq(trips.movedFrom, id)).get();
   if (existing) throw new Error("Für diese Fahrt ist schon eine Ersatzfahrt eingetragen");
   const ticketData = {
@@ -256,7 +257,7 @@ export function unmoveTrip(id: string): void {
       !db.select().from(tripEvents).where(eq(tripEvents.tripId, repl.id)).get() &&
       !db.select().from(attachments).where(eq(attachments.tripId, repl.id)).get() &&
       !db.select().from(claims).where(eq(claims.tripId, repl.id)).get();
-    if (repl.source === "copy" && untouched) deleteTrip(repl.id);
+    if ((repl.source === "copy" || repl.source === "replacement") && untouched) deleteTrip(repl.id);
     else db.update(trips).set({ movedFrom: null, updatedAt: now() }).where(eq(trips.id, repl.id)).run();
   }
   db.update(trips).set({ status: "planned", plan: null, updatedAt: now() }).where(eq(trips.id, id)).run();

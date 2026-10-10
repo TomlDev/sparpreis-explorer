@@ -70,7 +70,7 @@ describe("Eigene Messungen bleiben erhalten", () => {
     expect(dueLegs([l], at("2026-10-06T03:47:00Z"))).toEqual([]); // 3 min später, Zug noch nicht weg
     expect(dueLegs([l], at("2026-10-06T03:49:00Z"))).toEqual([0]); // prognostizierte Abfahrt erreicht
     expect(dueLegs([l], at("2026-10-06T03:54:00Z"))).toEqual([0]); // 10 min seit der letzten Messung
-    expect(dueLegs([leg], at("2026-10-06T02:30:00Z"))).toEqual([]); // mehr als 1 h vorher
-    expect(dueLegs([leg], at("2026-10-06T02:50:00Z"))).toEqual([0]); // erste Messung
+    expect(dueLegs([leg], at("2026-10-06T00:30:00Z"))).toEqual([]); // mehr als 3 h vorher
+    expect(dueLegs([leg], at("2026-10-06T02:30:00Z"))).toEqual([0]); // erster Blick (Startzeit des Zuges lernen)
   });
 });

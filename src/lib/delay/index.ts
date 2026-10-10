@@ -1,5 +1,5 @@
 import type { SearchResult } from "@/lib/domain/result";
-import { computeReliability, type Reliability } from "./reliability";
+import { computeReliability, type LegLike, type Reliability } from "./reliability";
 import { activeMonths, delayCacheVersion, getWeights, hasDelayData, resolveEva, statRows } from "./store";
 
 const memo = new Map<string, Reliability | null>();
@@ -39,5 +39,15 @@ export function annotateReliability(results: Iterable<SearchResult>, travelDate:
       memo.set(key, rel);
     }
     r.reliability = memo.get(key) ?? null;
+  }
+}
+
+/** Punctuality estimate for a bare list of legs (e.g. replacement connections), null without data. */
+export function reliabilityOfLegs(legs: LegLike[], travelDate: string): Reliability | null {
+  try {
+    if (!hasDelayData()) return null;
+    return computeReliability(legs, { resolveEva, rows: statRows }, { travelDate, months: activeMonths(), weights: getWeights() });
+  } catch {
+    return null;
   }
 }
