@@ -73,9 +73,9 @@ describe("Wofür gilt das Ticket?", () => {
     expect(t.minCovered).toBe(8); // Triberg: RE 14:02 → Bus 550 14:10 — that bus is still in the ticket
     expect(t.unprotected).toEqual([
       // the tram is punctual enough with 5 min, the bus with 4 min is not
-      { station: "Hauptbahnhof, Bochum", minutes: 5, where: "before", product: "tram", risky: false },
-      { station: "Steele S-Bahnhof, Essen (Ruhr)", minutes: 4, where: "before", product: "bus", risky: true },
-      { station: "Marktplatz, Triberg im Schwarzwald", minutes: 20, where: "after", product: "bus", risky: false },
+      { station: "Hauptbahnhof, Bochum", minutes: 5, where: "before", product: "tram", risky: false, toLeg: 1 },
+      { station: "Steele S-Bahnhof, Essen (Ruhr)", minutes: 4, where: "before", product: "bus", risky: true, toLeg: 2 },
+      { station: "Marktplatz, Triberg im Schwarzwald", minutes: 20, where: "after", product: "bus", risky: false, toLeg: 6 },
     ]);
   });
 
@@ -87,6 +87,6 @@ describe("Wofür gilt das Ticket?", () => {
       leg("nationalExpress", "ICE 10", "Bochum Hbf", "Dortmund Hbf", "17:50", "18:10"),
     ];
     const t = ticketTransfers(legViews(journey(null, ls)), [0]);
-    expect(t.unprotected).toEqual([{ station: "Hauptbahnhof, Bochum", minutes: 0, where: "before", product: "tram", risky: true }]);
+    expect(t.unprotected).toEqual([{ station: "Hauptbahnhof, Bochum", minutes: 0, where: "before", product: "tram", risky: true, toLeg: 2 }]);
   });
 });

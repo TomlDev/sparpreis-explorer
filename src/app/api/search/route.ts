@@ -49,6 +49,7 @@ function normalizeFilters(f: unknown): SearchFilters {
     allowSlow: o.allowSlow ?? DEFAULT_FILTERS.allowSlow,
     minTransferMin: num(o.minTransferMin),
     minFlexPct: num(o.minFlexPct),
+    maxOkPct: num(o.maxOkPct),
   };
 }
 

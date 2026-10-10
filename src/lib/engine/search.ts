@@ -537,6 +537,7 @@ export async function runSearch(params: SearchParams, opts: RunOptions): Promise
         if (!nearAnchor(r)) continue; // don't spend budget off-time
         if (maxFvLegs && r.metrics.fvLegs > maxFvLegs) continue;
         if (minFlex && r.reliability && r.reliability.flexPct * 100 < minFlex) continue;
+        if (params.filters.maxOkPct != null && r.reliability && r.reliability.okPct * 100 > params.filters.maxOkPct) continue;
         const viaKey = normStationName(r.headlineFv.fromName);
         if (seenVia.has(viaKey)) continue;
         const prev = byVia.get(viaKey);

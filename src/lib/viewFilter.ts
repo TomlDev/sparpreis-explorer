@@ -1,4 +1,4 @@
-import { cheapFlexOrder, flexOrder, type SortMode } from "@/lib/domain/ranking";
+import { cents, cheapFlexOrder, flexOrder, samePriceOrder, type SortMode } from "@/lib/domain/ranking";
 import { effectiveMinTransfer } from "@/lib/domain/ticketTransfers";
 import type { SearchResult } from "@/lib/domain/result";
 import type { SearchFilters } from "@/lib/engine/types";
@@ -130,6 +130,11 @@ export function filterReason(r: SearchResult, ctx: FilterContext): string | null
     if (flex * 100 < f.minFlexPct)
       return `Flex-Chance zu niedrig (${Math.round(flex * 100)} % < ${f.minFlexPct} %)`;
   }
+  if (f.maxOkPct != null) {
+    const ok = r.reliability?.okPct;
+    if (ok == null) return "keine Pünktlichkeitsdaten (Anschluss-Filter)";
+    if (ok * 100 > f.maxOkPct) return `Anschluss-Quote zu hoch (${Math.round(ok * 100)} % > ${f.maxOkPct} %)`;
+  }
   return null;
 }
 
@@ -158,7 +163,7 @@ export function clientSort(results: SearchResult[], mode: SortMode): SearchResul
   const price = (r: SearchResult, f: number) => r.coverage.price ?? f;
   const cmp: Record<SortMode, (a: SearchResult, b: SearchResult) => number> = {
     proforma: (a, b) => a.score - b.score,
-    cheapest: (a, b) => price(a, 1e9) - price(b, 1e9),
+    cheapest: (a, b) => cents(a.coverage.price) - cents(b.coverage.price) || samePriceOrder(a, b),
     fastest: (a, b) => a.metrics.durationMin - b.metrics.durationMin,
     "least-fv": (a, b) => a.metrics.fvMinutes - b.metrics.fvMinutes || price(a, 1e9) - price(b, 1e9),
     "fewest-transfers": (a, b) => a.metrics.transfers - b.metrics.transfers || price(a, 1e9) - price(b, 1e9),

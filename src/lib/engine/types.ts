@@ -21,6 +21,8 @@ export interface SearchFilters {
   minTransferMin: number | null;
   /** Only connections with at least this % chance of ≥ 20 min delay (punctuality data). */
   minFlexPct: number | null;
+  /** Highest acceptable chance (%) that every transfer holds — low = likely to break. */
+  maxOkPct: number | null;
 }
 
 export const DEFAULT_FILTERS: SearchFilters = {
@@ -41,6 +43,7 @@ export const DEFAULT_FILTERS: SearchFilters = {
   allowSlow: true,
   minTransferMin: null,
   minFlexPct: null,
+  maxOkPct: null,
 };
 
 export interface SearchParams {

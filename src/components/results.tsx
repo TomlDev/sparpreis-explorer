@@ -200,11 +200,8 @@ export function ResultCard({
   // results from the cache) and rebuilds the search that produced the shown price.
   const how = r.priceHow ?? (r.resultKind === "proforma" ? "proforma" : r.resultKind === "alternative" ? "via" : "plain");
   const withFv = (how === "proforma" || how === "via") && r.metrics.fvLegs === 1 && r.headlineFv;
-  // Only transfers inside the ticket count as "knappster Umstieg"; tight ones before it are a risk of their own.
+  // Only transfers inside the ticket count as "knappster Umstieg" (tight ones before it: see Itinerary).
   const tightest = effectiveMinTransfer(r);
-  const unprotected = r.coverage.uncoveredLegs?.length
-    ? ticketTransfers(r.legs, r.coverage.uncoveredLegs).unprotected.filter((u) => u.where === "before" && u.risky)
-    : [];
   const dbHref = `/api/dblink?${new URLSearchParams({
     from: m.originName,
     to: m.destinationName,
@@ -242,12 +239,6 @@ export function ResultCard({
             {!!r.coverage.uncoveredLegs?.length && (
               <div className="mt-0.5 text-xs text-muted-foreground">
                 🎫 Ticket gilt {r.coverage.offerFromName} → {r.coverage.offerToName}
-                {unprotected.map((u, i) => (
-                  <span key={i} className="block font-medium text-warning">
-                    ⚠ {u.minutes} min Umstieg in {u.station} vor Ticketbeginn – nicht geschützt: verpasst du dadurch den ersten
-                    Zug, gilt das Ticket nicht mehr
-                  </span>
-                ))}
               </div>
             )}
             <div className="mt-1.5">
@@ -502,6 +493,10 @@ function ChainPills({ legs }: { legs: Leg[] }) {
 /** Expanded plan — DB-style vertical timeline (time · node/line · station/train). */
 function Itinerary({ legs, reliability, uncovered }: { legs: Leg[]; reliability?: SearchResult["reliability"]; uncovered?: number[] }) {
   const last = legs[legs.length - 1];
+  // Tight transfers before the ticket starts — missing the first train there can cost the ticket.
+  const risky = uncovered?.length
+    ? ticketTransfers(legs, uncovered).unprotected.filter((u) => u.where === "before" && u.risky)
+    : [];
   return (
     <div className="text-sm">
       {legs.map((leg, i) => {
@@ -510,6 +505,18 @@ function Itinerary({ legs, reliability, uncovered }: { legs: Leg[]; reliability?
         const miss = transferInto(reliability, i);
         return (
           <div key={i}>
+            {risky
+              .filter((u) => u.toLeg === i)
+              .map((u) => (
+                <div key={`risk-${i}`} className="grid grid-cols-[3.25rem_1.25rem_1fr]">
+                  <span />
+                  <span />
+                  <p className="pb-1 text-xs font-medium text-warning">
+                    ⚠ {u.minutes} min zum Umsteigen, vor Ticketbeginn – nicht geschützt: verpasst du deshalb den nächsten Zug, gilt das
+                    Ticket nicht mehr
+                  </p>
+                </div>
+              ))}
             {/* boarding stop */}
             <div className="grid grid-cols-[3.25rem_1.25rem_1fr] items-start">
               <div className="pt-0.5 tabular-nums font-semibold text-foreground">

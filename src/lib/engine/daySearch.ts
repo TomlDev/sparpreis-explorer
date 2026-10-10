@@ -1,3 +1,4 @@
+import { cents, samePriceOrder } from "@/lib/domain/ranking";
 import type { SearchResult } from "@/lib/domain/result";
 import { runSearch, type RunOptions } from "./search";
 import type { SearchEvent, SearchMeta, SearchParams } from "./types";
@@ -16,14 +17,9 @@ export function mergeResults(into: Map<string, SearchResult>, results: SearchRes
   }
 }
 
-/** Cheapest first; same price → shorter Fernverkehr part, then higher Flex chance. */
+/** Cheapest first; same price → likelier to lose the Zugbindung first (see samePriceOrder). */
 export function byPrice(results: Iterable<SearchResult>): SearchResult[] {
-  return [...results].sort(
-    (a, b) =>
-      (a.coverage.price ?? 1e9) - (b.coverage.price ?? 1e9) ||
-      a.metrics.fvMinutes - b.metrics.fvMinutes ||
-      (b.reliability?.flexPct ?? 0) - (a.reliability?.flexPct ?? 0),
-  );
+  return [...results].sort((a, b) => cents(a.coverage.price) - cents(b.coverage.price) || samePriceOrder(a, b));
 }
 
 /**

@@ -2,10 +2,12 @@
 
 import * as React from "react";
 import { useSearchParams } from "next/navigation";
-import { ArrowDownUp, SlidersHorizontal, Search, StopCircle, GitCompare, CircleDollarSign, Pencil, CalendarRange, Trash2, Link2, Check } from "lucide-react";
+import { ArrowDownUp, SlidersHorizontal, Search, StopCircle, GitCompare, CircleDollarSign, Pencil, CalendarRange, Trash2, Link2, Check, Layers, List } from "lucide-react";
 import { Sheet } from "@/components/Sheet";
 import { AppHeader } from "@/components/AppHeader";
 import { CalendarStrip } from "@/components/CalendarStrip";
+import { GroupedResults } from "@/components/GroupedResults";
+import { RELIABILITY_NOTE } from "@/components/Reliability";
 import { CompareView } from "@/components/CompareView";
 import { FiltersSheet } from "@/components/FiltersSheet";
 import { ResultCard } from "@/components/results";
@@ -61,9 +63,12 @@ function Home() {
   const [filters, setFilters] = React.useState<SearchFilters>(initialView.filters);
   // Whole-day scan: cheapest connection with one Fernverkehr leg and a high Flex chance.
   const [dayScan, setDayScan] = React.useState(initialView.day);
+  // Results grouped by price — the default for the day scan, a toggle next to the sorting.
+  const [grouped, setGrouped] = React.useState(initialView.day);
   const beforeDayScan = React.useRef<{ sort: SortMode; maxFvLegs: number | null; minFlexPct: number | null } | null>(null);
   function toggleDayScan(on: boolean) {
     setDayScan(on);
+    setGrouped(on);
     if (on) {
       beforeDayScan.current = { sort, maxFvLegs: filters.maxFvLegs, minFlexPct: filters.minFlexPct };
       setSort("cheapest");
@@ -301,6 +306,32 @@ function Home() {
         sort,
       ),
     [displayResults, filters, sort, referencePrice, refLeadKeys, timeWindow, timeTo, timeMode, dayScan],
+  );
+
+  const renderCard = (r: SearchResult) => (
+    <ResultCard
+      key={r.fingerprint + r.variant}
+      r={r}
+      travelDate={travelDate}
+      compareOn={compare.has(r.fingerprint)}
+      onToggleCompare={() => toggleCompare(r.fingerprint)}
+      referencePrice={effectiveReference}
+      isReference={r.fingerprint === referenceFp}
+      onSetReference={() => chooseReference(r.fingerprint, r.coverage.price ?? null)}
+      open={openCards.has(r.fingerprint)}
+      onOpenChange={(o) => setCardOpen(r.fingerprint, o)}
+    />
+  );
+  const groupToggle = (
+    <Chip
+      type="button"
+      active={grouped}
+      onClick={() => setGrouped((g) => !g)}
+      title={grouped ? "Als Liste zeigen" : "Nach Preis gruppieren"}
+      className="inline-flex items-center gap-1 whitespace-nowrap px-2.5 py-1 text-xs"
+    >
+      {grouped ? <Layers className="h-3.5 w-3.5" /> : <List className="h-3.5 w-3.5" />} {grouped ? "Gruppiert" : "Liste"}
+    </Chip>
   );
 
   // ---- Shareable view: keep the URL = what is on screen ----
@@ -661,6 +692,7 @@ function Home() {
         {/* Mobile sort row (desktop uses the floating right stack) */}
         {displayResults.length > 0 && (
           <div className="mt-3 flex gap-2 overflow-x-auto pb-1 lg:hidden">
+            <span className="shrink-0">{groupToggle}</span>
             {(Object.keys(SORT_LABELS) as SortMode[]).map((s) => (
               <Chip key={s} type="button" active={sort === s} onClick={() => setSort(s)} className="shrink-0">
                 {SORT_LABELS[s]}
@@ -729,20 +761,14 @@ function Home() {
             )
           )}
           <div className="space-y-2 lg:hidden">{infoNotices}</div>
-          {sorted.map((r) => (
-            <ResultCard
-              key={r.fingerprint + r.variant}
-              r={r}
-              travelDate={travelDate}
-              compareOn={compare.has(r.fingerprint)}
-              onToggleCompare={() => toggleCompare(r.fingerprint)}
-              referencePrice={effectiveReference}
-              isReference={r.fingerprint === referenceFp}
-              onSetReference={() => chooseReference(r.fingerprint, r.coverage.price ?? null)}
-              open={openCards.has(r.fingerprint)}
-              onOpenChange={(o) => setCardOpen(r.fingerprint, o)}
-            />
-          ))}
+          {grouped ? (
+            <GroupedResults results={sorted} renderCard={renderCard} />
+          ) : (
+            sorted.map((r) => renderCard(r))
+          )}
+          {sorted.some((r) => r.reliability) && (
+            <p className="px-1 pt-2 text-[11px] text-muted-foreground">Anschluss / Flex: {RELIABILITY_NOTE}</p>
+          )}
         </div>
       </main>
 
@@ -874,7 +900,10 @@ function Home() {
       {/* Floating sort controls — right screen edge, vertically stacked */}
       {displayResults.length > 0 && (
         <div className="fixed right-3 top-1/2 z-40 hidden -translate-y-1/2 flex-col items-stretch gap-1.5 rounded-2xl border border-border bg-card/95 p-2 shadow-lg backdrop-blur lg:flex">
-          <span className="px-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Sortierung</span>
+          <div className="flex items-center justify-between gap-2">
+            <span className="px-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Sortierung</span>
+            {groupToggle}
+          </div>
           {(Object.keys(SORT_LABELS) as SortMode[]).map((s) => (
             <Chip key={s} type="button" active={sort === s} onClick={() => setSort(s)}>
               {SORT_LABELS[s]}

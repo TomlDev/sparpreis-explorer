@@ -71,6 +71,12 @@ export function FiltersSheet({
           onChange={(v) => set("minFlexPct", v)}
           suffix="%"
         />
+        <NumField
+          label="Max. Anschluss-Quote (alle Umstiege klappen, Statistik)"
+          value={filters.maxOkPct}
+          onChange={(v) => set("maxOkPct", v)}
+          suffix="%"
+        />
 
         <button
           type="button"

@@ -23,6 +23,21 @@ export const SORT_LABELS: Record<SortMode, string> = {
   "cheap-flex": "🎯 Günstig & oft Flex",
 };
 
+/**
+ * Same price → the likelier the Zugbindung goes: fewer transfers that hold
+ * ("Anschluss" low) first, then the higher Flex chance, then less Fernverkehr.
+ */
+export function samePriceOrder(a: SearchResult, b: SearchResult): number {
+  return (
+    (a.reliability?.okPct ?? 1) - (b.reliability?.okPct ?? 1) ||
+    (b.reliability?.flexPct ?? 0) - (a.reliability?.flexPct ?? 0) ||
+    a.metrics.fvMinutes - b.metrics.fvMinutes
+  );
+}
+
+/** Prices compared in whole cents (no float noise between equal fares). */
+export const cents = (p: number | null | undefined, fallback = 1e9) => (p == null ? fallback : Math.round(p * 100));
+
 /** Highest chance of ≥ 20 min delay first (Zugbindung likely lifted);
  *  connections without punctuality data last. */
 export function flexOrder(a: SearchResult, b: SearchResult): number {
@@ -88,7 +103,7 @@ function priceOr(r: SearchResult, fallback: number): number {
 export function compareBy(mode: SortMode): (a: SearchResult, b: SearchResult) => number {
   switch (mode) {
     case "cheapest":
-      return (a, b) => priceOr(a, 1e9) - priceOr(b, 1e9);
+      return (a, b) => cents(a.coverage.price) - cents(b.coverage.price) || samePriceOrder(a, b);
     case "fastest":
       return (a, b) => a.metrics.durationMin - b.metrics.durationMin;
     case "least-fv":

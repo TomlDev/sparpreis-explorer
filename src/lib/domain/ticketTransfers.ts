@@ -12,6 +12,8 @@ export interface UnprotectedTransfer {
   product?: string;
   /** Tight for that kind of transport (see RISKY_BELOW). */
   risky: boolean;
+  /** Index of the leg you change into. */
+  toLeg: number;
 }
 
 /**
@@ -53,6 +55,7 @@ export function ticketTransfers(legs: LegView[], uncovered?: number[]): TicketTr
         where: b.i <= firstCovered ? "before" : "after",
         product: a.l.product,
         risky: gap < riskyBelow(a.l.product),
+        toLeg: b.i,
       });
     else minCovered = minCovered == null ? gap : Math.min(minCovered, gap);
   }
