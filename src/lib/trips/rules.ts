@@ -8,7 +8,12 @@
  *    ≥ 120 min: 50 %. Amounts below 4 € are not paid out.
  *  - Expected ≥ 60 min delay: don't travel → full refund; break off and
  *    return to the start → full refund; break off → refund of the unused part.
- *  - Expected ≥ 20 min delay: Zugbindung (e.g. Sparpreis) is lifted.
+ *  - Expected ≥ 20 min delay: Zugbindung (e.g. Sparpreis) is lifted — and the
+ *    ticket may be used later, per DB even on another day up to a year after
+ *    (BB Personenverkehr Nr. 9.1.1; EU Art. 18(1)(c) from 60 min). Compensation
+ *    is paid once per ticket; for a journey made later DB in practice measures
+ *    the delay against the timetable of the journey actually made (not stated
+ *    officially — surfaced as a caveat).
  *  - Exclusions under Art. 19(10) Reg. (EU) 2021/782 (extraordinary
  *    circumstances such as severe weather or third parties on the track) may
  *    be invoked by DB against the delay compensation.
@@ -51,6 +56,8 @@ export interface TripFacts {
   roundTrip?: boolean;
   /** Round trip: what this direction cost (DB prices Hin- and Rückfahrt separately). */
   directionPrice?: number | null;
+  /** Journey made later on the ticket of another (booked) trip. */
+  replacement?: boolean;
 }
 
 export interface Entitlement {
@@ -106,7 +113,7 @@ export function assess(t: TripFacts): Entitlement | null {
         ...(ok
           ? ["Belege (Screenshot der Ausfall-/Verspätungsmeldung) helfen."]
           : ["Nur bei Zugausfall oder erwarteter Verspätung ≥ 60 min – bitte erwartete Verspätung eintragen."]),
-        "Bist du doch (später) gefahren, wähle „Verspätet angekommen“ – dann zählt die Verspätung am Ziel.",
+        "Bist du doch gefahren, wähle „Verspätet angekommen“ – dann zählt die Verspätung am Ziel. Mit dem Ticket an einem anderen Tag gefahren: „Später gefahren“ (Erstattung und Fahrt schließen sich aus).",
       ],
     };
   }
@@ -155,9 +162,31 @@ export function assess(t: TripFacts): Entitlement | null {
     ],
     caveats: [
       ...(!payable ? [`Beträge unter ${MIN_PAYOUT} € zahlt die DB nicht aus.`] : []),
+      ...(t.replacement ? [REPLACEMENT_CAVEAT] : []),
       "Bei außergewöhnlichen Umständen (z. B. Unwetter, Personen im Gleis) kann die DB die Entschädigung ablehnen.",
     ],
   };
+}
+
+const REPLACEMENT_CAVEAT =
+  "Ersatzfahrt mit dem Ticket einer anderen Fahrt: Gerechnet ist gegen den Fahrplan dieser Fahrt – so handhabt es die DB in der Praxis meist, offiziell geregelt ist es nicht. Im Antrag die gebuchte Verbindung, diese Ersatzverbindung und die tatsächliche Ankunft angeben (Ausdruck der Ersatzverbindung beilegen).";
+
+/**
+ * Booked trip not taken, ticket used for a journey on another day / time
+ * (status "moved"): no claim for this one, only what to keep in mind.
+ */
+export function movedNotes(expectedDelayMin: number | null): { notes: string[]; warnings: string[] } {
+  const notes = [
+    "Ab 20 min erwarteter Verspätung am Ziel entfällt die Zugbindung: Du darfst mit dem Ticket auch später fahren – laut DB sogar an einem anderen Tag, bis zu ein Jahr nach dem Reisedatum (Beförderungsbedingungen Nr. 9.1.1).",
+    "Für diese nicht gefahrene Verbindung gibt es weder Erstattung noch Entschädigung. Entschädigung gibt es pro Ticket nur einmal – für eine Verspätung der Ersatzfahrt (ab 60 min).",
+  ];
+  const warnings =
+    expectedDelayMin == null
+      ? ["Bitte die erwartete Verspätung eintragen und den Screenshot der Prognose aufheben – die spätere Fahrt ist nur ab 20 min erlaubt."]
+      : expectedDelayMin < 20
+        ? ["Unter 20 min erwarteter Verspätung gilt die Zugbindung – die spätere Fahrt wäre mit diesem Ticket nicht erlaubt."]
+        : [];
+  return { notes, warnings };
 }
 
 /** Live hints while travelling (expected delay at the destination). */

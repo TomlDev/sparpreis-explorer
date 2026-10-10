@@ -31,7 +31,8 @@ export function applyOrders(
   for (const o of orders) {
     const nr = o.auftragsnummer;
     if (!nr) continue;
-    const mine = list.filter((t) => t.orderNumber === nr);
+    // Replacement journeys share the order number but not the booked day.
+    const mine = list.filter((t) => t.orderNumber === nr && !t.movedFrom);
     const detail = details.get(nr);
     for (const g of o.gesamtreisen ?? []) {
       for (const [dirKey, dir] of [
@@ -71,7 +72,7 @@ export async function syncDbAccount(): Promise<DbAccountStatus> {
         const nr = o.auftragsnummer;
         // Details only where they matter: round trips without the direction price yet.
         if (!nr || !known.get(nr)?.roundTrip) continue;
-        const both = db.select().from(trips).all().filter((t) => t.orderNumber === nr);
+        const both = db.select().from(trips).all().filter((t) => t.orderNumber === nr && !t.movedFrom);
         if (both.every((t) => t.ticket?.directionPrice != null)) continue;
         details.set(nr, await getJson<DbOrderDetail>(`/web/api/buchung/auftrag/${encodeURIComponent(nr)}`));
       }

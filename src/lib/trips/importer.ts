@@ -240,7 +240,8 @@ export async function importDocument(file: ImportFile, source = "import", depth 
       ? db
           .select()
           .from(trips)
-          .where(and(eq(trips.orderNumber, orderNumber), eq(trips.direction, j.direction ?? "outbound")))
+          // never a replacement journey (same order number, but another day)
+          .where(and(eq(trips.orderNumber, orderNumber), eq(trips.direction, j.direction ?? "outbound"), isNull(trips.movedFrom)))
           .get()
       : null;
     // A trip created from a passenger-rights mail has no direction yet.
@@ -249,7 +250,7 @@ export async function importDocument(file: ImportFile, source = "import", depth 
         ? db
             .select()
             .from(trips)
-            .where(and(eq(trips.orderNumber, orderNumber), isNull(trips.direction), eq(trips.date, date)))
+            .where(and(eq(trips.orderNumber, orderNumber), isNull(trips.direction), eq(trips.date, date), isNull(trips.movedFrom)))
             .get()
         : null;
     // Without an order number (e.g. a bare .ics): same day + same first train

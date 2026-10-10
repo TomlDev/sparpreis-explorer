@@ -11,10 +11,18 @@ import { STATUS, legColor, legLabel, mapsLink, uploadFiles } from "@/components/
 import type { AttachmentRow, ClaimRow, TripEventRow, TripRow } from "@/db/schema";
 import { berlinDay, berlinToIso, formatTime, todayLocal } from "@/lib/time";
 import { delayMin, realtimeSummary, type RealtimeSummary } from "@/lib/trips/realtime";
-import { arrivalDelayMin, assess, liveHints, onlineClaimType, ticketSpan, type OnlineClaimType } from "@/lib/trips/rules";
+import { planStates, type PlanInfo } from "@/lib/trips/plan";
+import { arrivalDelayMin, assess, liveHints, movedNotes, onlineClaimType, ticketSpan, type OnlineClaimType } from "@/lib/trips/rules";
 import { cn, formatEuro } from "@/lib/utils";
 
-type Detail = TripRow & { events: TripEventRow[]; attachments: AttachmentRow[]; claims: ClaimRow[] };
+type TripRef = Pick<TripRow, "id" | "date" | "plannedDeparture" | "originName" | "destName">;
+type Detail = TripRow & {
+  events: TripEventRow[];
+  attachments: AttachmentRow[];
+  claims: ClaimRow[];
+  movedTo: (TripRef & { status: string }) | null;
+  movedFromTrip: (TripRef & { expectedDelayMin: number | null }) | null;
+};
 
 const EVENT_LABEL: Record<string, string> = {
   control: "Kontrolliert",
@@ -47,12 +55,19 @@ export default function TripPage() {
   const [dialog, setDialog] = React.useState<{ event: TripEventRow | null; type: "control" | "note" } | null>(null);
 
   const [loadError, setLoadError] = React.useState<string | null>(null);
+  /** Trips of the same day — to tell which one of a double booking you'll take. */
+  const [sameDay, setSameDay] = React.useState<TripRow[]>([]);
   const load = React.useCallback(async () => {
     try {
       const res = await fetch(`/api/trips/${id}`);
       if (res.ok) {
-        setT((await res.json()).trip);
+        const trip = (await res.json()).trip as Detail;
+        setT(trip);
         setLoadError(null);
+        fetch(`/api/trips?from=${trip.date}&to=${trip.date}`)
+          .then((r) => (r.ok ? r.json() : { trips: [] }))
+          .then((d) => setSameDay(d.trips ?? []))
+          .catch(() => {});
       } else setLoadError(res.status === 404 ? "Diese Fahrt gibt es nicht (mehr)." : `Laden fehlgeschlagen (${res.status}).`);
     } catch {
       setLoadError("Keine Verbindung – bitte später erneut versuchen.");
@@ -126,7 +141,10 @@ export default function TripPage() {
     returnedToStart: t.returnedToStart,
     roundTrip: t.roundTrip,
     directionPrice: t.ticket?.directionPrice ?? null,
+    replacement: !!t.movedFrom,
   });
+  const plan = planStates(sameDay.some((x) => x.id === t.id) ? sameDay.map((x) => (x.id === t.id ? t : x)) : [...sameDay, t]).get(t.id);
+  const rivals = sameDay.filter((x) => plan?.rivals.includes(x.id));
   const screenshots = t.attachments.filter((a) => !["claim", "ticket", "decision"].includes(a.kind));
   const tickets = t.attachments.filter((a) => a.kind === "ticket");
   const forms = t.attachments.filter((a) => a.kind === "claim" || a.kind === "decision");
@@ -186,6 +204,8 @@ export default function TripPage() {
               {STATUS[t.status]?.label ?? t.status}
             </span>
           </div>
+          <MovedBanner t={t} />
+          <PlanRow t={t} plan={plan} rivals={rivals} onSave={patch} />
           {t.ticket?.scheduleChange && (
             <div className="mt-3 rounded-xl border border-warning/40 bg-warning/10 p-3 text-sm">
               <b>Fahrplanänderung</b> (Mail der DB vom {new Date(t.ticket.scheduleChange.notifiedAt).toLocaleDateString("de-DE")})
@@ -325,6 +345,10 @@ export default function TripPage() {
           key={`${t.status}|${t.actualArrival}|${t.abortedAt}|${t.expectedDelayMin}|${t.returnedToStart}|${t.notes}`}
           t={t}
           saved={whSaved}
+          onMoved={(m) => {
+            flash(m);
+            load();
+          }}
           onSave={async (b) => {
             const ok = await patch(b);
             if (ok) {
@@ -338,7 +362,21 @@ export default function TripPage() {
         {/* Compensation */}
         <Card className="p-4">
           <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">Fahrgastrechte</h2>
-          {ent ? (
+          {t.status === "moved" ? (
+            <div className="space-y-2 text-sm">
+              <span className="font-semibold">Ticket an einem anderen Tag genutzt</span>
+              {movedNotes(t.expectedDelayMin).notes.map((n) => (
+                <p key={n} className="text-muted-foreground">
+                  {n}
+                </p>
+              ))}
+              {movedNotes(t.expectedDelayMin).warnings.map((n) => (
+                <p key={n} className="text-xs text-warning">
+                  {n}
+                </p>
+              ))}
+            </div>
+          ) : ent ? (
             <ClaimBox t={t} ent={ent} onDone={load} />
           ) : (
             <p className="text-sm text-muted-foreground">
@@ -734,7 +772,17 @@ function TicketFields({ t, onSave }: { t: Detail; onSave: (b: Record<string, unk
 }
 
 /** Status + what actually happened (actual arrival, abort station, expected delay, free text). */
-function WhatHappened({ t, saved, onSave }: { t: Detail; saved: boolean; onSave: (b: Record<string, unknown>) => Promise<boolean> }) {
+function WhatHappened({
+  t,
+  saved,
+  onSave,
+  onMoved,
+}: {
+  t: Detail;
+  saved: boolean;
+  onSave: (b: Record<string, unknown>) => Promise<boolean>;
+  onMoved: (msg: string) => void;
+}) {
   const span = ticketSpan(t);
   const rt = realtimeSummary(t.legs);
   const stations = Array.from(new Set(t.legs.flatMap((l) => [l.fromName, l.toName])));
@@ -746,6 +794,20 @@ function WhatHappened({ t, saved, onSave }: { t: Detail; saved: boolean; onSave:
   const [expected, setExpected] = React.useState(t.expectedDelayMin != null ? String(t.expectedDelayMin) : "");
   const [notes, setNotes] = React.useState(t.notes ?? "");
   const [busy, setBusy] = React.useState(false);
+  const [err, setErr] = React.useState<string | null>(null);
+  // "Später gefahren": on which day, and with which journey (existing trip or the same trains)
+  const nextDay = new Date(Date.parse(`${t.date}T12:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+  const [moveDate, setMoveDate] = React.useState(t.movedTo?.date ?? nextDay);
+  const [moveTarget, setMoveTarget] = React.useState<string>("");
+  const [dayTrips, setDayTrips] = React.useState<TripRow[]>([]);
+  React.useEffect(() => {
+    if (status !== "moved" || t.status === "moved" || !/^\d{4}-\d{2}-\d{2}$/.test(moveDate)) return;
+    fetch(`/api/trips?from=${moveDate}&to=${moveDate}`)
+      .then((r) => (r.ok ? r.json() : { trips: [] }))
+      .then((d) => setDayTrips(((d.trips ?? []) as TripRow[]).filter((x) => x.id !== t.id && !x.movedFrom)))
+      .catch(() => setDayTrips([]));
+    setMoveTarget("");
+  }, [status, moveDate, t.id, t.status]);
 
   const options: [string, string][] = [
     ["done", "Wie geplant / pünktlich"],
@@ -753,12 +815,16 @@ function WhatHappened({ t, saved, onSave }: { t: Detail; saved: boolean; onSave:
     ["aborted", "Unterwegs abgebrochen"],
     ["not_started", "Nicht angetreten"],
     ["cancelled", "Zugausfall – nicht gefahren"],
+    // a replacement journey can't be moved on again
+    ...(t.movedFrom ? [] : ([["moved", "Mit dem Ticket später gefahren"]] as [string, string][])),
   ];
   const needsArrival = status === "delayed" || status === "done";
-  const needsExpected = status === "aborted" || status === "not_started";
+  const needsExpected = status === "aborted" || status === "not_started" || status === "moved";
   const hint =
     status === "cancelled"
-      ? "Nur wählen, wenn du die Reise deshalb nicht angetreten hast. Bist du später doch gefahren: „Verspätet angekommen“."
+      ? "Nur wählen, wenn du die Reise deshalb nicht angetreten hast. Mit dem Ticket an einem anderen Tag gefahren: „Mit dem Ticket später gefahren“."
+      : status === "moved" && t.status !== "moved"
+        ? "Ab 20 min angekündigter Verspätung darfst du mit dem Ticket später fahren, laut DB auch an einem anderen Tag. Die Fahrt, die du dann machst, wird als eigene Fahrt eingetragen – dort zählt eine neue Verspätung."
       : status === "delayed" && !arrTime
         ? "Trag die tatsächliche Ankunft ein – erst dann lässt sich die Entschädigung berechnen."
         : null;
@@ -844,6 +910,42 @@ function WhatHappened({ t, saved, onSave }: { t: Detail; saved: boolean; onSave:
             <Input inputMode="numeric" placeholder="z. B. 75" value={expected} onChange={(e) => setExpected(e.target.value.replace(/\D/g, ""))} />
           </label>
         )}
+        {status === "moved" && t.status !== "moved" && (
+          <div className="flex flex-col gap-2 text-sm sm:col-span-2">
+            <label className="flex flex-col gap-1">
+              <span className="text-xs text-muted-foreground">Gefahren am</span>
+              <Input type="date" value={moveDate} min={t.date} onChange={(e) => setMoveDate(e.target.value)} />
+            </label>
+            <div className="space-y-1">
+              <label className="flex items-start gap-2">
+                <input type="radio" className="mt-1" checked={moveTarget === ""} onChange={() => setMoveTarget("")} />
+                <span>
+                  Mit denselben Zügen ({formatTime(t.plannedDeparture)} ab {t.originName}) – als neue Fahrt anlegen
+                </span>
+              </label>
+              {dayTrips.map((x) => (
+                <label key={x.id} className="flex items-start gap-2">
+                  <input type="radio" className="mt-1" checked={moveTarget === x.id} onChange={() => setMoveTarget(x.id)} />
+                  <span>
+                    Schon eingetragen: {formatTime(x.plannedDeparture)} {x.originName} → {x.destName}
+                  </span>
+                </label>
+              ))}
+              <p className="text-xs text-muted-foreground">
+                Andere Verbindung? Erst in der Suche bei der Verbindung „Gebucht“ tippen, dann taucht sie hier zur Auswahl auf.
+              </p>
+            </div>
+          </div>
+        )}
+        {t.status === "moved" && status === "moved" && t.movedTo && (
+          <p className="text-sm sm:col-span-2">
+            Gefahren am{" "}
+            <Link href={`/reisen/${t.movedTo.id}`} className="font-medium text-primary underline">
+              {dayLabel(t.movedTo.date)}, {formatTime(t.movedTo.plannedDeparture)}
+            </Link>
+            .
+          </p>
+        )}
         <label className="flex flex-col gap-1 text-sm sm:col-span-2">
           <span className="text-xs text-muted-foreground">So bin ich tatsächlich gefahren / Bemerkungen</span>
           <textarea
@@ -863,20 +965,115 @@ function WhatHappened({ t, saved, onSave }: { t: Detail; saved: boolean; onSave:
           if (iso && span.arrival && new Date(iso).getTime() < new Date(span.arrival).getTime() - 6 * 3600_000)
             iso = new Date(new Date(iso).getTime() + 86_400_000).toISOString();
           setBusy(true);
+          setErr(null);
+          const move = async (method: "POST" | "DELETE", body?: unknown) => {
+            const res = await fetch(`/api/trips/${t.id}/move`, {
+              method,
+              headers: { "Content-Type": "application/json" },
+              body: body ? JSON.stringify(body) : undefined,
+            }).catch(() => null);
+            if (!res?.ok) setErr((await res?.json().catch(() => ({})))?.error ?? "Keine Verbindung");
+            return !!res?.ok;
+          };
+          // Leaving "moved": unlink (and remove the copied replacement) first.
+          if (t.status === "moved" && status !== "moved") {
+            if (!confirm("Ersatzfahrt-Verknüpfung aufheben? Eine automatisch angelegte, unveränderte Ersatzfahrt wird gelöscht.")) {
+              setBusy(false);
+              return;
+            }
+            if (!(await move("DELETE"))) return setBusy(false);
+          }
           const ok = await onSave({
-            status,
+            ...(status === "moved" ? {} : { status }),
             actualArrival: needsArrival ? iso : null,
             abortedAt: status === "aborted" ? abortedAt : null,
             returnedToStart: status === "aborted" ? returned : false,
             expectedDelayMin: needsExpected && expected ? Number(expected) : null,
             notes: notes.trim() || null,
           });
+          if (ok && status === "moved" && t.status !== "moved" && (await move("POST", { date: moveDate, targetId: moveTarget || null })))
+            onMoved("Ersatzfahrt eingetragen");
           setBusy(false);
         }}
       >
         {busy ? <Spinner /> : saved ? "Gespeichert ✓" : "Speichern"}
       </Button>
+      {err && <p className="mt-2 text-sm text-danger">{err}</p>}
     </Card>
+  );
+}
+
+/** The two ends of "ticket used another day": the booked trip ↔ the journey made. */
+function MovedBanner({ t }: { t: Detail }) {
+  const ref = t.status === "moved" ? t.movedTo : t.movedFromTrip;
+  if (!ref) return null;
+  return (
+    <div className="mt-3 rounded-xl border border-primary/30 bg-primary/5 p-3 text-sm">
+      {t.status === "moved" ? "🔁 Nicht gefahren – mit diesem Ticket gefahren am " : "🔁 Ersatzfahrt mit dem Ticket der Fahrt vom "}
+      <Link href={`/reisen/${ref.id}`} className="font-medium text-primary underline">
+        {dayLabel(ref.date)}, {formatTime(ref.plannedDeparture)}
+      </Link>
+      {t.movedFromTrip?.expectedDelayMin != null && ` (damals angekündigt: +${t.movedFromTrip.expectedDelayMin} min)`}
+    </div>
+  );
+}
+
+/** "Nehme ich wahr?" — for upcoming trips, above all when a day has two bookings. */
+function PlanRow({
+  t,
+  plan,
+  rivals,
+  onSave,
+}: {
+  t: Detail;
+  plan: PlanInfo | undefined;
+  rivals: TripRow[];
+  onSave: (b: Record<string, unknown>) => Promise<boolean>;
+}) {
+  if (t.status !== "planned") return null;
+  const mine = t.plan === "take" || t.plan === "skip" ? t.plan : null;
+  const btn = (value: "take" | "skip", label: string) => (
+    <button
+      type="button"
+      aria-pressed={mine === value}
+      onClick={() => onSave({ plan: mine === value ? null : value })}
+      className={cn(
+        "rounded-full border px-3 py-1.5 text-sm",
+        mine === value
+          ? value === "take"
+            ? "border-success bg-success text-white"
+            : "border-muted-foreground bg-muted-foreground text-background"
+          : "border-border hover:bg-muted",
+      )}
+    >
+      {label}
+    </button>
+  );
+  return (
+    <div className="mt-3 border-t border-border pt-3 text-sm">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-muted-foreground">Fährst du diese Fahrt?</span>
+        {btn("take", "✓ Nehme ich")}
+        {btn("skip", "✗ Nehme ich nicht")}
+      </div>
+      {plan?.state === "open" && <p className="mt-2 text-warning">Am selben Tag doppelt gebucht – markier, welche du nimmst.</p>}
+      {plan?.implied && plan.state === "skip" && !mine && (
+        <p className="mt-2 text-muted-foreground">Du nimmst eine andere Fahrt dieses Tages – diese gilt als nicht wahrgenommen.</p>
+      )}
+      {rivals.length > 0 && (
+        <ul className="mt-2 space-y-0.5 text-xs text-muted-foreground">
+          {rivals.map((r) => (
+            <li key={r.id}>
+              Am selben Tag auch:{" "}
+              <Link href={`/reisen/${r.id}`} className="text-primary underline">
+                {formatTime(r.plannedDeparture)} {r.originName} → {r.destName}
+              </Link>
+              {r.plan === "take" ? " · nehme ich" : r.plan === "skip" || r.status === "moved" ? " · nehme ich nicht" : ""}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 

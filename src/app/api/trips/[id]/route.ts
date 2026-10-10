@@ -38,6 +38,7 @@ export async function PATCH(req: Request, { params }: Ctx) {
       returnedToStart: typeof b.returnedToStart === "boolean" ? b.returnedToStart : undefined,
       roundTrip: typeof b.roundTrip === "boolean" ? b.roundTrip : undefined,
       notes: str(b.notes),
+      plan: b.plan === "take" || b.plan === "skip" || b.plan === null ? (b.plan as string | null) : undefined,
       ticket: current ? { ...(current.ticket ?? {}), directionPrice } : undefined,
     });
     return trip ? NextResponse.json({ trip }) : NextResponse.json({ error: "nicht gefunden" }, { status: 404 });

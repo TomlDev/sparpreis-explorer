@@ -4,6 +4,7 @@ import { db } from "@/db/client";
 import { trips } from "@/db/schema";
 import { getSetting, setSetting } from "@/lib/repo/settings";
 import { reminders } from "./loyalty";
+import { planStates } from "./plan";
 
 /**
  * iCalendar feed for phone calendars (Google/Apple/Thunderbird subscribe to a
@@ -58,12 +59,18 @@ const STATUS: Record<string, string> = {
   aborted: " (abgebrochen)",
   not_started: " (nicht angetreten)",
   cancelled: " (Zugausfall)",
+  moved: " (Ticket später genutzt)",
 };
 
 export function buildCalendar(baseUrl: string): string {
   const now = stamp(new Date());
   const lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Sparpreis-Explorer//Reisen//DE", "CALSCALE:GREGORIAN", "METHOD:PUBLISH", "X-WR-CALNAME:Bahnreisen", "X-WR-TIMEZONE:Europe/Berlin", "REFRESH-INTERVAL;VALUE=DURATION:PT1H", "X-PUBLISHED-TTL:PT1H"];
-  for (const t of db.select().from(trips).orderBy(asc(trips.date)).all()) {
+  const all = db.select().from(trips).orderBy(asc(trips.date)).all();
+  const plans = planStates(all);
+  for (const t of all) {
+    // planned trips: double booking → which one; the spare is marked as such
+    const plan = t.status === "planned" ? plans.get(t.id)?.state : null;
+    const planNote = plan === "skip" ? " (nehme ich nicht)" : plan === "open" ? " (doppelt gebucht?)" : "";
     const rides = t.legs.filter((l) => !l.isWalking);
     const desc = [
       ...t.legs.map((l) =>
@@ -84,7 +91,7 @@ export function buildCalendar(baseUrl: string): string {
       lines.push(`DTSTART:${stamp(t.plannedDeparture!)}`, `DTEND:${stamp(end)}`);
     } else lines.push(`DTSTART;VALUE=DATE:${day(t.date)}`, `DTEND;VALUE=DATE:${day(nextDay(t.date))}`);
     lines.push(
-      `SUMMARY:${esc(`🚆 ${t.originName} → ${t.destName}${STATUS[t.status] ?? ""}`)}`,
+      `SUMMARY:${esc(`🚆 ${t.originName} → ${t.destName}${STATUS[t.status] ?? ""}${planNote}`)}`,
       `LOCATION:${esc(rides[0]?.fromName ?? t.originName)}`,
       `DESCRIPTION:${esc(desc.join("\n"))}`,
       `URL:${baseUrl}/reisen/${t.id}`,

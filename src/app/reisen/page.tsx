@@ -8,6 +8,7 @@ import { Button, Card, Input, Spinner } from "@/components/ui";
 import { BahnCards, CalendarSubscribe, Promos, Reminders, useAccount } from "@/components/trips/AccountPanel";
 import { STATUS, legColor, legLabel } from "@/components/trips/tripUi";
 import type { TripRow } from "@/db/schema";
+import { planStates, type PlanInfo } from "@/lib/trips/plan";
 import { berlinToIso, formatTime } from "@/lib/time";
 import { cn, formatEuro } from "@/lib/utils";
 
@@ -112,6 +113,7 @@ export default function TripsPage() {
   for (const r of acc?.reminders ?? []) if (r.kind !== "trip") remindersByDay.set(r.date, [...(remindersByDay.get(r.date) ?? []), r.title]);
   const byDay = new Map<string, TripRow[]>();
   for (const t of trips) byDay.set(t.date, [...(byDay.get(t.date) ?? []), t]);
+  const plans = planStates(trips);
   const today = todayStr();
   // Trips already shown under "Als Nächstes" aren't repeated below the calendar.
   const rest = trips.filter((t) => !nextIds.includes(t.id));
@@ -155,7 +157,14 @@ export default function TripsPage() {
           />
         )}
 
-        <NextTrips key={`n${rev}`} onShown={setNextIds} />
+        <NextTrips
+          key={`n${rev}`}
+          onShown={setNextIds}
+          onChanged={() => {
+            load();
+            setRev((r) => r + 1);
+          }}
+        />
 
         <Card className="p-3 sm:p-4">
           <div className="mb-3 flex items-center justify-between">
@@ -202,8 +211,12 @@ export default function TripsPage() {
                     <Link
                       key={t.id}
                       href={`/reisen/${t.id}`}
-                      className="mb-0.5 flex items-center gap-0.5 overflow-hidden rounded bg-muted/60 px-0.5 py-0.5 hover:bg-muted sm:gap-1 sm:px-1"
-                      title={`${formatTime(t.plannedDeparture)} ${t.originName} → ${t.destName} · ${STATUS[t.status]?.label ?? t.status}`}
+                      className={cn(
+                        "mb-0.5 flex items-center gap-0.5 overflow-hidden rounded bg-muted/60 px-0.5 py-0.5 hover:bg-muted sm:gap-1 sm:px-1",
+                        t.status === "planned" && plans.get(t.id)?.state === "skip" && "line-through opacity-50",
+                        t.status === "planned" && plans.get(t.id)?.state === "open" && "ring-1 ring-warning",
+                      )}
+                      title={`${formatTime(t.plannedDeparture)} ${t.originName} → ${t.destName} · ${STATUS[t.status]?.label ?? t.status}${planTitle(t, plans.get(t.id))}`}
                     >
                       <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", STATUS[t.status]?.dot)} />
                       <span className="tabular-nums">{formatTime(t.plannedDeparture)}</span>
@@ -229,7 +242,7 @@ export default function TripsPage() {
             </p>
           )}
           {rest.map((t) => (
-            <TripCard key={t.id} t={t} />
+            <TripCard key={t.id} t={t} plan={plans.get(t.id)} onChanged={load} />
           ))}
         </div>
 
@@ -244,10 +257,18 @@ export default function TripsPage() {
   );
 }
 
-function TripCard({ t }: { t: TripRow }) {
+const planTitle = (t: TripRow, p: PlanInfo | undefined) =>
+  t.status !== "planned" || !p?.state ? "" : p.state === "take" ? " · nehme ich" : p.state === "skip" ? " · nehme ich nicht" : " · doppelt gebucht";
+
+async function setPlan(id: string, plan: "take" | "skip" | null) {
+  await fetch(`/api/trips/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ plan }) }).catch(() => {});
+}
+
+function TripCard({ t, plan, onChanged }: { t: TripRow; plan?: PlanInfo; onChanged?: () => void }) {
+  const state = t.status === "planned" ? (plan?.state ?? null) : null;
   return (
     <Link href={`/reisen/${t.id}`} className="block">
-      <Card className="flex items-center gap-3 p-3 hover:bg-muted/40">
+      <Card className={cn("flex items-center gap-3 p-3 hover:bg-muted/40", state === "skip" && "opacity-60", state === "open" && "border-warning")}>
         <div className="w-24 shrink-0 text-sm">
           <div className="font-semibold">
             {new Date(`${t.date}T12:00:00Z`).toLocaleDateString("de-DE", {
@@ -275,6 +296,28 @@ function TripCard({ t }: { t: TripRow }) {
             {t.ticket?.scheduleChange?.zugbindungLifted && (
               <span className="rounded bg-warning/15 px-1.5 py-0.5 text-[10px] font-semibold text-warning">Zugbindung aufgehoben</span>
             )}
+            {t.movedFrom && <span className="rounded bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold text-primary">🔁 Ersatzfahrt</span>}
+            {state === "take" && !plan?.implied && (
+              <span className="rounded bg-success/15 px-1.5 py-0.5 text-[10px] font-semibold text-success">✓ Nehme ich</span>
+            )}
+            {state === "skip" && <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-semibold">Nehme ich nicht</span>}
+            {state === "open" && (
+              <>
+                <span className="rounded bg-warning/15 px-1.5 py-0.5 text-[10px] font-semibold text-warning">Doppelt gebucht</span>
+                <button
+                  type="button"
+                  className="rounded border border-success px-1.5 py-0.5 text-[10px] font-semibold text-success hover:bg-success/10"
+                  onClick={async (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    await setPlan(t.id, "take");
+                    onChanged?.();
+                  }}
+                >
+                  ✓ Die nehme ich
+                </button>
+              </>
+            )}
           </div>
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1">
@@ -287,8 +330,9 @@ function TripCard({ t }: { t: TripRow }) {
 }
 
 /** The next trip from today on — independent of the month shown. */
-function NextTrips({ onShown }: { onShown: (ids: string[]) => void }) {
+function NextTrips({ onShown, onChanged }: { onShown: (ids: string[]) => void; onChanged: () => void }) {
   const [list, setList] = React.useState<TripRow[] | null>(null);
+  const [plans, setPlans] = React.useState<Map<string, PlanInfo>>(new Map());
   React.useEffect(() => {
     const from = todayStr();
     const to = new Date(Date.now() + 365 * 86_400_000).toLocaleDateString("sv-SE", { timeZone: "Europe/Berlin" });
@@ -297,8 +341,14 @@ function NextTrips({ onShown }: { onShown: (ids: string[]) => void }) {
       .then((d) => {
         const now = Date.now();
         // still to come (or under way today); skip trips that didn't take place
-        const up = ((d.trips ?? []) as TripRow[]).filter(
-          (t) => !["not_started", "cancelled"].includes(t.status) && (!t.plannedArrival || new Date(t.plannedArrival).getTime() > now - 3600_000),
+        const all = (d.trips ?? []) as TripRow[];
+        const plans = planStates(all);
+        setPlans(plans);
+        const up = all.filter(
+          (t) =>
+            !["not_started", "cancelled", "moved"].includes(t.status) &&
+            plans.get(t.id)?.state !== "skip" &&
+            (!t.plannedArrival || new Date(t.plannedArrival).getTime() > now - 3600_000),
         );
         setList(up.slice(0, 1));
         onShown(up.slice(0, 1).map((t) => t.id));
@@ -310,7 +360,7 @@ function NextTrips({ onShown }: { onShown: (ids: string[]) => void }) {
     <div className="space-y-2">
       <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Nächste Fahrt</h2>
       {list.map((t) => (
-        <TripCard key={t.id} t={t} />
+        <TripCard key={t.id} t={t} plan={plans.get(t.id)} onChanged={onChanged} />
       ))}
     </div>
   );
@@ -479,7 +529,7 @@ function Vouchers() {
   const t = todayStr();
   const openOnes = list.filter((v) => !v.redeemed && (!v.validUntil || v.validUntil >= t)).sort((a, b) => b.value - a.value);
   const done = list.filter((v) => !openOnes.includes(v)).sort((a, b) => b.receivedAt.localeCompare(a.receivedAt));
-  const sum = openOnes.reduce((x, v) => x + v.value, 0);
+  const sum = openOnes.reduce((x, v) => x + (v.value ?? 0), 0);
   const row = (v: Voucher) => (
     <div key={v.number} className={cn("flex flex-wrap items-center gap-x-3 gap-y-1 py-1.5", v.redeemed && "opacity-50")}>
       <span className="font-mono">{v.number}</span>
@@ -487,12 +537,13 @@ function Vouchers() {
         key={`${v.number}-${v.value}`}
         className="h-7 w-20 text-right"
         inputMode="decimal"
-        defaultValue={v.value.toFixed(2).replace(".", ",")}
+        placeholder="?"
+        defaultValue={v.value != null ? v.value.toFixed(2).replace(".", ",") : ""}
         onBlur={(e) => {
           const raw = e.target.value.trim();
           const n = Number(raw.replace(",", "."));
           // empty or not a number → back to the stored amount, never 0 €
-          if (!raw || !Number.isFinite(n) || n < 0) e.target.value = v.value.toFixed(2).replace(".", ",");
+          if (!raw || !Number.isFinite(n) || n < 0) e.target.value = v.value != null ? v.value.toFixed(2).replace(".", ",") : "";
           else if (n !== v.value) post({ action: "update", number: v.number, value: n });
         }}
         aria-label="Betrag"

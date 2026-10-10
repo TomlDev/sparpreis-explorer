@@ -17,10 +17,12 @@ import {
 } from "@/db/schema";
 import { newId, now } from "@/db/util";
 import { formatInTimeZone } from "date-fns-tz";
+import { berlinToIso } from "@/lib/time";
 
 const TZ = "Europe/Berlin";
 
-export const TRIP_STATUSES = ["planned", "done", "delayed", "aborted", "not_started", "cancelled"] as const;
+/** moved = not taken; the ticket was used for another journey (see movedFrom). */
+export const TRIP_STATUSES = ["planned", "done", "delayed", "aborted", "not_started", "cancelled", "moved"] as const;
 export type TripStatus = (typeof TRIP_STATUSES)[number];
 
 export interface TripInput {
@@ -37,12 +39,17 @@ export interface TripInput {
   ticket?: TicketInfo | null;
   roundTrip?: boolean;
   notes?: string | null;
+  movedFrom?: string | null;
 }
 
 export interface TripDetail extends TripRow {
   events: TripEventRow[];
   attachments: AttachmentRow[];
   claims: ClaimRow[];
+  /** status "moved": the journey actually made on this ticket */
+  movedTo: Pick<TripRow, "id" | "date" | "plannedDeparture" | "originName" | "destName" | "status"> | null;
+  /** replacement journey: the booked trip whose ticket it uses */
+  movedFromTrip: Pick<TripRow, "id" | "date" | "plannedDeparture" | "originName" | "destName" | "expectedDelayMin"> | null;
 }
 
 const rideLegs = (legs: TripLeg[]) => legs.filter((l) => !l.isWalking);
@@ -99,6 +106,8 @@ export function createTrip(input: TripInput): TripRow {
     returnedToStart: false,
     roundTrip: input.roundTrip ?? false,
     notes: input.notes ?? null,
+    plan: null,
+    movedFrom: input.movedFrom ?? null,
     createdAt: now(),
     updatedAt: now(),
   };
@@ -123,6 +132,18 @@ export function getTrip(id: string): TripDetail | null {
     events: db.select().from(tripEvents).where(eq(tripEvents.tripId, id)).orderBy(asc(tripEvents.at)).all(),
     attachments: db.select().from(attachments).where(eq(attachments.tripId, id)).orderBy(asc(attachments.createdAt)).all(),
     claims: db.select().from(claims).where(eq(claims.tripId, id)).orderBy(desc(claims.createdAt)).all(),
+    movedTo: db
+      .select({ id: trips.id, date: trips.date, plannedDeparture: trips.plannedDeparture, originName: trips.originName, destName: trips.destName, status: trips.status })
+      .from(trips)
+      .where(eq(trips.movedFrom, id))
+      .get() ?? null,
+    movedFromTrip: t.movedFrom
+      ? (db
+          .select({ id: trips.id, date: trips.date, plannedDeparture: trips.plannedDeparture, originName: trips.originName, destName: trips.destName, expectedDelayMin: trips.expectedDelayMin })
+          .from(trips)
+          .where(eq(trips.id, t.movedFrom))
+          .get() ?? null)
+      : null,
   };
 }
 
@@ -142,6 +163,7 @@ const EDITABLE = [
   "ticket",
   "notes",
   "legs",
+  "plan",
 ] as const;
 type Editable = (typeof EDITABLE)[number];
 
@@ -149,6 +171,7 @@ export function updateTrip(id: string, patch: Partial<Pick<TripRow, Editable>>):
   const set: Partial<TripRow> = { updatedAt: now() };
   for (const k of EDITABLE) if (patch[k] !== undefined) (set as Record<string, unknown>)[k] = patch[k];
   if (set.status && !(TRIP_STATUSES as readonly string[]).includes(set.status)) throw new Error("ungültiger Status");
+  if (set.plan !== undefined && set.plan !== null && set.plan !== "take" && set.plan !== "skip") throw new Error("ungültige Planung");
   if (set.legs) {
     // Re-import / edit: what we tracked on the same trains stays (live observations are evidence).
     const before = db.select({ legs: trips.legs }).from(trips).where(eq(trips.id, id)).get();
@@ -159,10 +182,91 @@ export function updateTrip(id: string, patch: Partial<Pick<TripRow, Editable>>):
   return db.select().from(trips).where(eq(trips.id, id)).get() ?? null;
 }
 
+/** Same wall-clock times n days later (Berlin time, so a DST change keeps 08:12 at 08:12). */
+function shiftIso(iso: string | null, days: number): string | null {
+  if (!iso) return iso;
+  const day = formatInTimeZone(new Date(iso), TZ, "yyyy-MM-dd");
+  const [y, m, d] = day.split("-").map(Number);
+  const to = new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
+  return berlinToIso(to, formatInTimeZone(new Date(iso), TZ, "HH:mm")) ?? iso;
+}
+
+/**
+ * "Mit dem Ticket an einem anderen Tag / mit einer anderen Verbindung gefahren":
+ * the booked trip becomes "moved" and points to the journey actually made —
+ * an existing trip of that day (e.g. booked via the search) or a copy of the
+ * same trains on the new date. The replacement carries the ticket data (claims
+ * on it need order number and price) but never real-time data of the original.
+ */
+export function moveTrip(id: string, opts: { date: string; targetId?: string | null }): TripRow {
+  const from = db.select().from(trips).where(eq(trips.id, id)).get();
+  if (!from) throw new Error("Fahrt nicht gefunden");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(opts.date)) throw new Error("Datum fehlt");
+  if (from.movedFrom) throw new Error("Das ist schon eine Ersatzfahrt");
+  const existing = db.select().from(trips).where(eq(trips.movedFrom, id)).get();
+  if (existing) throw new Error("Für diese Fahrt ist schon eine Ersatzfahrt eingetragen");
+  const ticketData = {
+    orderNumber: from.orderNumber,
+    price: from.price,
+    klasse: from.klasse,
+    ticketType: from.ticketType,
+    direction: from.direction,
+    roundTrip: from.roundTrip,
+    ticket: from.ticket,
+  };
+  let target: TripRow;
+  if (opts.targetId) {
+    const t = db.select().from(trips).where(eq(trips.id, opts.targetId)).get();
+    if (!t || t.id === id) throw new Error("Ersatzfahrt nicht gefunden");
+    if (t.movedFrom) throw new Error("Diese Fahrt ist schon Ersatz für eine andere");
+    // Ticket fields the replacement doesn't have yet come from the booked trip.
+    const fill = Object.fromEntries(
+      Object.entries(ticketData).filter(([k]) => t[k as keyof TripRow] == null || (k === "roundTrip" && !t.roundTrip)),
+    );
+    db.update(trips).set({ ...fill, movedFrom: id, plan: "take", updatedAt: now() }).where(eq(trips.id, t.id)).run();
+    target = db.select().from(trips).where(eq(trips.id, t.id)).get()!;
+  } else {
+    const days = Math.round((Date.parse(`${opts.date}T12:00:00Z`) - Date.parse(`${from.date}T12:00:00Z`)) / 86_400_000);
+    const legs: TripLeg[] = from.legs.map((l) => ({
+      product: l.product,
+      lineName: l.lineName,
+      trainNumber: l.trainNumber,
+      fromId: l.fromId,
+      fromName: l.fromName,
+      toId: l.toId,
+      toName: l.toName,
+      plannedDeparture: shiftIso(l.plannedDeparture, days),
+      plannedArrival: shiftIso(l.plannedArrival, days),
+      isWalking: l.isWalking,
+      depPlatform: l.depPlatform,
+      arrPlatform: l.arrPlatform,
+    }));
+    target = createTrip({ date: opts.date, legs, source: "copy", ...ticketData, movedFrom: id });
+    db.update(trips).set({ plan: "take" }).where(eq(trips.id, target.id)).run();
+  }
+  db.update(trips).set({ status: "moved", plan: "skip", updatedAt: now() }).where(eq(trips.id, id)).run();
+  return target;
+}
+
+/** Undo moveTrip: the booked trip is "planned" again; a copied replacement is deleted, a linked one only unlinked. */
+export function unmoveTrip(id: string): void {
+  const repl = db.select().from(trips).where(eq(trips.movedFrom, id)).get();
+  if (repl) {
+    const untouched =
+      !db.select().from(tripEvents).where(eq(tripEvents.tripId, repl.id)).get() &&
+      !db.select().from(attachments).where(eq(attachments.tripId, repl.id)).get() &&
+      !db.select().from(claims).where(eq(claims.tripId, repl.id)).get();
+    if (repl.source === "copy" && untouched) deleteTrip(repl.id);
+    else db.update(trips).set({ movedFrom: null, updatedAt: now() }).where(eq(trips.id, repl.id)).run();
+  }
+  db.update(trips).set({ status: "planned", plan: null, updatedAt: now() }).where(eq(trips.id, id)).run();
+}
+
 export function deleteTrip(id: string): void {
   if (!db.select().from(trips).where(eq(trips.id, id)).get()) return;
   for (const a of db.select().from(attachments).where(eq(attachments.tripId, id)).all()) removeFile(a.path);
   db.delete(trips).where(eq(trips.id, id)).run();
+  db.update(trips).set({ movedFrom: null }).where(eq(trips.movedFrom, id)).run();
   // Our own id format only (never a path from outside).
   if (/^trip_[0-9a-f-]{36}$/.test(id)) fs.rmSync(path.join(/*turbopackIgnore: true*/ uploadsDir(), id), { recursive: true, force: true });
 }

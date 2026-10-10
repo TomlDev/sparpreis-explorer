@@ -597,9 +597,9 @@ export const trips = sqliteTable(
     plannedDeparture: text("planned_departure"),
     plannedArrival: text("planned_arrival"),
     legs: text("legs", { mode: "json" }).$type<TripLeg[]>().notNull(),
-    // planned | done | delayed | aborted | not_started | cancelled
+    // planned | done | delayed | aborted | not_started | cancelled | moved
     status: text("status").notNull().default("planned"),
-    // search | pdf | email | db | manual
+    // search | pdf | email | db | manual | copy (replacement journey, see movedFrom)
     source: text("source").notNull().default("manual"),
     fingerprint: text("fingerprint"),
     refreshToken: text("refresh_token"),
@@ -620,6 +620,10 @@ export const trips = sqliteTable(
     /** Price is for a round-trip ticket (claims use half of it). */
     roundTrip: integer("round_trip", { mode: "boolean" }).notNull().default(false),
     notes: text("notes"),
+    /** Will I take this one? take | skip | null (e.g. two bookings for one day). */
+    plan: text("plan"),
+    /** Replacement journey on the ticket of that trip (which then has status "moved"). */
+    movedFrom: text("moved_from"),
     createdAt: integer("created_at").notNull(),
     updatedAt: integer("updated_at").notNull(),
   },

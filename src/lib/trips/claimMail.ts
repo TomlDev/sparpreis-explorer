@@ -121,7 +121,9 @@ function findClaim(caseId: string, orderNumber: string | null, date: string | nu
   const candidates = orderNumber ? db.select().from(trips).where(eq(trips.orderNumber, orderNumber)).all() : [];
   // With a known travel date only that day's trip counts (the return of a
   // round trip is a different trip); no date → any trip of the order.
-  const trip = (date ? candidates.find((t) => t.date === date) : candidates[0]) ?? null;
+  let trip = (date ? candidates.find((t) => t.date === date) : candidates[0]) ?? null;
+  // Ticket used another day: the claim is about the journey actually made.
+  if (trip?.status === "moved") trip = db.select().from(trips).where(eq(trips.movedFrom, trip.id)).get() ?? trip;
   // A claim created in the app (form) but not yet linked to a case id.
   const open = trip
     ? (db
