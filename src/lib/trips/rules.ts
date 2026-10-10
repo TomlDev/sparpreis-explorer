@@ -49,6 +49,8 @@ export interface TripFacts {
   returnedToStart?: boolean;
   /** Ticket was a round trip; `price` is then the whole ticket. */
   roundTrip?: boolean;
+  /** Round trip: what this direction cost (DB prices Hin- and Rückfahrt separately). */
+  directionPrice?: number | null;
 }
 
 export interface Entitlement {
@@ -78,8 +80,15 @@ const ROUND_TRIP_REFUND =
   "Hin- und Rückfahrt: Wird dadurch die ganze Reise sinnlos, kann auch der volle Ticketpreis erstattet werden – das entscheidet die DB.";
 
 export function assess(t: TripFacts): Entitlement | null {
-  const fare = t.price != null ? (t.roundTrip ? t.price / 2 : t.price) : null;
-  const fareNote = t.roundTrip ? "Grundlage: halber Preis des Hin- und Rückfahrt-Tickets." : null;
+  // Round trip: the price of this direction if known, else half the ticket in whole
+  // cents (72,73 € → 36,37 €) — DB prices the directions separately (e.g. 20,99 + 51,74).
+  const dir = t.roundTrip && t.directionPrice != null && t.directionPrice > 0 ? t.directionPrice : null;
+  const fare = dir ?? (t.price != null ? (t.roundTrip ? share(t.price, 0.5) : t.price) : null);
+  const fareNote = !t.roundTrip
+    ? null
+    : dir != null
+      ? "Grundlage: Preis dieser Fahrtrichtung des Hin- und Rückfahrt-Tickets."
+      : "Grundlage: halber Preis des Hin- und Rückfahrt-Tickets – den genauen Preis dieser Richtung zeigt „Meine Reisen“ auf bahn.de (Ticketdaten bearbeiten).";
 
   if (t.status === "not_started" || t.status === "cancelled") {
     const exp = t.expectedDelayMin ?? null;

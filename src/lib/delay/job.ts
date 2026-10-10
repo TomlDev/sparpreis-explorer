@@ -81,11 +81,11 @@ export function relevantStations(): { evas: string[]; names: string[] } {
   return { evas: [...evas].sort(), names: [...names].sort() };
 }
 
-function pythonBin(): string {
+export function pythonBin(): string {
   return process.env.DELAY_PYTHON || process.env.DB_IMPERSONATE_PYTHON || "python3";
 }
 
-function dbPath(): string {
+export function dbPath(): string {
   const p = process.env.DATABASE_PATH || "./data/bahn-finder.db";
   return path.isAbsolute(p) ? p : path.join(/*turbopackIgnore: true*/ process.cwd(), p);
 }

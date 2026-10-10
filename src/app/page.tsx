@@ -59,6 +59,23 @@ function Home() {
   const [mode, setMode] = React.useState<"fast" | "thorough" | "deep">(initialView.mode);
   const [sort, setSort] = React.useState<SortMode>(initialView.sort);
   const [filters, setFilters] = React.useState<SearchFilters>(initialView.filters);
+  // Whole-day scan: cheapest connection with one Fernverkehr leg and a high Flex chance.
+  const [dayScan, setDayScan] = React.useState(initialView.day);
+  const beforeDayScan = React.useRef<{ sort: SortMode; maxFvLegs: number | null; minFlexPct: number | null } | null>(null);
+  function toggleDayScan(on: boolean) {
+    setDayScan(on);
+    if (on) {
+      beforeDayScan.current = { sort, maxFvLegs: filters.maxFvLegs, minFlexPct: filters.minFlexPct };
+      setSort("cheapest");
+      setFilters({ ...filters, maxFvLegs: 1, minFlexPct: filters.minFlexPct ?? 50 });
+      if (mode === "fast") setMode("thorough");
+    } else if (beforeDayScan.current) {
+      const b = beforeDayScan.current;
+      setSort(b.sort);
+      setFilters({ ...filters, maxFvLegs: b.maxFvLegs, minFlexPct: b.minFlexPct });
+      beforeDayScan.current = null;
+    }
+  }
   const [referencePrice, setReferencePrice] = React.useState<number | null>(initialView.refPrice);
   const [referenceFp, setReferenceFp] = React.useState<string | null>(initialView.refFp);
   const [filtersOpen, setFiltersOpen] = React.useState(initialView.dialog === "filters");
@@ -192,7 +209,9 @@ function Home() {
     e?.preventDefault();
     if (!origin || !dest) return;
     // Phase 1: show the normal bookable connections (reference candidates).
-    const body = { ...bodyBase(), travelDate, mode, stage: "normal" as const };
+    const body = dayScan
+      ? { ...bodyBase(), travelDate, mode, scope: "day" as const, stage: "full" as const }
+      : { ...bodyBase(), travelDate, mode, stage: "normal" as const };
     try {
       localStorage.setItem("lastBody", JSON.stringify(body));
     } catch {}
@@ -272,10 +291,16 @@ function Home() {
   const sorted = React.useMemo(
     () =>
       clientSort(
-        clientFilter(displayResults, filters, referencePrice, refLeadKeys, timeFilterWindow(timeWindow, timeTo, timeMode)),
+        clientFilter(
+          displayResults,
+          filters,
+          referencePrice,
+          refLeadKeys,
+          dayScan ? null : timeFilterWindow(timeWindow, timeTo, timeMode),
+        ),
         sort,
       ),
-    [displayResults, filters, sort, referencePrice, refLeadKeys, timeWindow, timeTo, timeMode],
+    [displayResults, filters, sort, referencePrice, refLeadKeys, timeWindow, timeTo, timeMode, dayScan],
   );
 
   // ---- Shareable view: keep the URL = what is on screen ----
@@ -294,6 +319,7 @@ function Home() {
     open: [...openCards],
     compare: [...compare],
     dialog: filtersOpen ? "filters" : calendarOpen ? "calendar" : compareOpen ? "compare" : null,
+    day: dayScan,
   });
   React.useEffect(() => {
     if (!shown) return; // nothing searched yet → keep the URL clean
@@ -373,7 +399,8 @@ function Home() {
           {origin?.label} → {dest?.label}
         </span>
         <span className="hidden shrink-0 text-xs text-muted-foreground xl:inline">
-          {timeMode === "arrival" ? "an" : "ab"} {timeWindow}–{timeTo} · {MODES.find((m) => m.key === mode)?.label}
+          {dayScan ? "ganzer Tag" : `${timeMode === "arrival" ? "an" : "ab"} ${timeWindow}–${timeTo}`} ·{" "}
+          {MODES.find((m) => m.key === mode)?.label}
         </span>
         <Pencil className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
       </button>
@@ -416,7 +443,7 @@ function Home() {
       {teaser && !state.results.length && !state.running && (
         <div className="text-xs text-muted-foreground">Zuletzt gefunden {formatAgo(teaser.at)}</div>
       )}
-      {!referenceFp && sorted.length > 0 && !state.running && (
+      {!referenceFp && !dayScan && sorted.length > 0 && !state.running && (
         <div className="rounded-xl border border-primary/30 bg-primary/5 p-3 text-sm">
           Wähle mit <b>„Als Referenz"</b> deine Wunschverbindung — danach sucht die App automatisch alle{" "}
           <b>günstigeren</b> Alternativen mit möglichst wenig Fernverkehr.
@@ -463,37 +490,49 @@ function Home() {
                   className="h-11 rounded-xl border border-input bg-background px-3 text-base"
                 />
               </label>
-              <div className="rounded-xl border border-input bg-background px-3.5 pb-2 pt-2.5">
-                <TimeRange
-                  from={timeWindow}
-                  to={timeTo}
-                  onChange={(f, t) => {
-                    setTimeWindow(f);
-                    setTimeTo(t);
-                  }}
-                  noun={timeMode === "arrival" ? "Ankunft" : "Abfahrt"}
-                  label={
-                    <span className="inline-flex rounded-md bg-muted p-0.5" role="group" aria-label="Zeitfenster bezieht sich auf">
-                      {(["departure", "arrival"] as const).map((m) => (
-                        <button
-                          key={m}
-                          type="button"
-                          onClick={() => setTimeMode(m)}
-                          aria-pressed={timeMode === m}
-                          className={
-                            "rounded px-2 py-0.5 text-xs font-medium transition " +
-                            (timeMode === m
-                              ? "bg-card text-foreground shadow-sm"
-                              : "text-muted-foreground hover:text-foreground")
-                          }
-                        >
-                          {m === "departure" ? "Abfahrt" : "Ankunft"}
-                        </button>
-                      ))}
-                    </span>
-                  }
-                />
+              <div className="rounded-xl border border-input bg-background px-3.5 py-1.5">
+                <Switch checked={dayScan} onChange={toggleDayScan} label="Ganzer Tag: günstigste Flex-Verbindung" />
+                {dayScan && (
+                  <p className="pb-1 text-xs text-muted-foreground">
+                    Sucht den ganzen Tag (ab 05 Uhr, 6 Zeitfenster) nach Tickets mit genau einem Fernverkehrs-Abschnitt und
+                    hoher Flex-Chance (ab {filters.minFlexPct ?? 0} %, im Filter änderbar) – sortiert nach Preis. Dauert ein
+                    paar Minuten.
+                  </p>
+                )}
               </div>
+              {!dayScan && (
+                <div className="rounded-xl border border-input bg-background px-3.5 pb-2 pt-2.5">
+                  <TimeRange
+                    from={timeWindow}
+                    to={timeTo}
+                    onChange={(f, t) => {
+                      setTimeWindow(f);
+                      setTimeTo(t);
+                    }}
+                    noun={timeMode === "arrival" ? "Ankunft" : "Abfahrt"}
+                    label={
+                      <span className="inline-flex rounded-md bg-muted p-0.5" role="group" aria-label="Zeitfenster bezieht sich auf">
+                        {(["departure", "arrival"] as const).map((m) => (
+                          <button
+                            key={m}
+                            type="button"
+                            onClick={() => setTimeMode(m)}
+                            aria-pressed={timeMode === m}
+                            className={
+                              "rounded px-2 py-0.5 text-xs font-medium transition " +
+                              (timeMode === m
+                                ? "bg-card text-foreground shadow-sm"
+                                : "text-muted-foreground hover:text-foreground")
+                            }
+                          >
+                            {m === "departure" ? "Abfahrt" : "Ankunft"}
+                          </button>
+                        ))}
+                      </span>
+                    }
+                  />
+                </div>
+              )}
             </div>
 
             {/* Modes */}
@@ -503,11 +542,15 @@ function Home() {
                   key={m.key}
                   type="button"
                   onClick={() => setMode(m.key)}
+                  // The fast mode skips the one-Fernverkehr-leg pricing the day scan is about.
+                  disabled={dayScan && m.key === "fast"}
                   className={
-                    "rounded-xl border p-2 text-center transition " +
-                    (mode === m.key ? "border-primary bg-primary/10" : "border-border hover:bg-muted")
+                    "rounded-xl border p-2 text-center transition disabled:opacity-40 " +
+                    (mode === m.key && !(dayScan && m.key === "fast")
+                      ? "border-primary bg-primary/10"
+                      : "border-border hover:bg-muted")
                   }
-                  title={m.hint}
+                  title={dayScan && m.key === "fast" ? "Für den ganzen Tag mindestens „Gründlich“" : m.hint}
                 >
                   <div className="text-sm font-medium">{m.label}</div>
                 </button>

@@ -24,7 +24,9 @@ export function AppHeader({ center }: { center?: ReactNode }) {
           </span>
           <span className="hidden lg:inline">Sparpreis-Explorer</span>
         </Link>
-        {center ? <div className="min-w-0 flex-1">{center}</div> : <div className="flex-1" />}
+        {/* Phones: the page's compact bar gets its own row below — it doesn't fit next to the icons. */}
+        <div className={center ? "flex-1 sm:hidden" : "flex-1"} />
+        {center && <div className="hidden min-w-0 flex-1 sm:block">{center}</div>}
         <nav className="flex shrink-0 items-center gap-0.5 sm:gap-1 [&>*]:h-9 [&>*]:w-9 sm:[&>*]:h-10 sm:[&>*]:w-10">
           <Link href="/reisen" className={buttonClass("ghost", "icon")} aria-label="Reisen" title="Meine Reisen">
             <CalendarDays className="h-5 w-5" />
@@ -44,6 +46,7 @@ export function AppHeader({ center }: { center?: ReactNode }) {
           </Button>
         </nav>
       </div>
+      {center && <div className="container pb-2 sm:hidden">{center}</div>}
       <TodayBanner />
     </header>
   );

@@ -216,7 +216,9 @@ export async function runSearch(params: SearchParams, opts: RunOptions): Promise
   // Persisted across searches: vias already tried for this route+date, so we
   // never re-price the same boarding station (no wasted budget) and can tell
   // when there is genuinely nothing more to fetch.
-  const routeKey = `${params.originKey ?? params.originId ?? "?"}|${params.destKey ?? params.destId ?? "?"}|${params.travelDate}`;
+  const routeKey =
+    `${params.originKey ?? params.originId ?? "?"}|${params.destKey ?? params.destId ?? "?"}|${params.travelDate}` +
+    (params.daySlot ? `|${params.timeWindow}` : "");
   for (const v of getAttemptedVias(routeKey)) seenVia.add(v);
   // User preferences (BahnCard / class / D-Ticket) applied to price checks.
   const prefs = getPreferences();
@@ -516,9 +518,15 @@ export async function runSearch(params: SearchParams, opts: RunOptions): Promise
     const priceProforma = async () => {
       if (!dbOrigin || !dbDest || !pricing) return;
       const byVia = new Map<string, SearchResult>();
+      // Punctuality is known from the legs alone — don't spend budget on what the filters drop anyway.
+      annotateReliability(collected.values(), params.travelDate);
+      const minFlex = params.filters.minFlexPct;
+      const maxFvLegs = params.filters.maxFvLegs;
       for (const r of collected.values()) {
         if (r.metrics.fvLegs < 1 || r.coverage.price != null || !r.headlineFv) continue;
         if (!nearAnchor(r)) continue; // don't spend budget off-time
+        if (maxFvLegs && r.metrics.fvLegs > maxFvLegs) continue;
+        if (minFlex && r.reliability && r.reliability.flexPct * 100 < minFlex) continue;
         const viaKey = normStationName(r.headlineFv.fromName);
         if (seenVia.has(viaKey)) continue;
         const prev = byVia.get(viaKey);
@@ -861,9 +869,12 @@ export async function runSearch(params: SearchParams, opts: RunOptions): Promise
     // search must keep the SAME leading trains, so broad exploration at other
     // hubs/times only produces connections the prefix filter discards — the
     // pro-forma passes (at the reference time) yield the matching alternatives.
+    // A whole-day scan skips it too: 25 timetable calls per slot would take minutes and
+    // trip MOTIS' rate limit; the one-FV-leg pricing uses observed + learned segments.
     if (
       params.stage !== "normal" &&
       !alternativesMode &&
+      !params.daySlot &&
       (params.mode === "thorough" || params.mode === "deep") &&
       !abort()
     ) {

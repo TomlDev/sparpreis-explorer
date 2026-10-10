@@ -16,8 +16,13 @@ export async function PATCH(req: Request, { params }: Ctx) {
   ensureReady();
   const b = (await req.json().catch(() => ({}))) as Record<string, unknown>;
   const str = (v: unknown) => (v === null ? null : typeof v === "string" ? v.slice(0, 2000) : undefined);
+  const id = (await params).id;
+  // Round trip: price of this direction — merged into the stored ticket details.
+  const dp = b.directionPrice;
+  const directionPrice = dp === null || (typeof dp === "number" && Number.isFinite(dp) && dp >= 0 && dp < 10_000) ? dp : undefined;
   try {
-    const trip = updateTrip((await params).id, {
+    const current = directionPrice !== undefined ? getTrip(id) : null;
+    const trip = updateTrip(id, {
       status: typeof b.status === "string" ? b.status : undefined,
       orderNumber: str(b.orderNumber),
       price: typeof b.price === "number" || b.price === null ? (b.price as number | null) : undefined,
@@ -33,6 +38,7 @@ export async function PATCH(req: Request, { params }: Ctx) {
       returnedToStart: typeof b.returnedToStart === "boolean" ? b.returnedToStart : undefined,
       roundTrip: typeof b.roundTrip === "boolean" ? b.roundTrip : undefined,
       notes: str(b.notes),
+      ticket: current ? { ...(current.ticket ?? {}), directionPrice } : undefined,
     });
     return trip ? NextResponse.json({ trip }) : NextResponse.json({ error: "nicht gefunden" }, { status: 404 });
   } catch (e) {

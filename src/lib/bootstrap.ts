@@ -5,6 +5,8 @@ import { db } from "@/db/client";
 import { ensureDefaultProfiles } from "@/lib/routeProfiles";
 import { pruneCache } from "@/lib/cache/cache";
 import { startMailPolling } from "@/lib/trips/mailSync";
+import { startActualsPolling } from "@/lib/trips/actuals";
+import { startLivePolling } from "@/lib/trips/live";
 
 let ready = false;
 let pruneStarted = false;
@@ -37,6 +39,8 @@ export function ensureReady(): void {
       }
     }, 60 * 60 * 1000).unref(); // don't keep scripts/tests alive
     startMailPolling();
+    startActualsPolling();
+    startLivePolling();
   }
   ready = true;
 }

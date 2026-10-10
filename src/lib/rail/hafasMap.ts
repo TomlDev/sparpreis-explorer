@@ -46,12 +46,16 @@ export function mapStopover(so: unknown): NormStopover {
     plannedDeparture?: string;
     arrival?: string;
     departure?: string;
+    cancelled?: boolean;
   };
   return {
     id: o.stop?.id ? String(o.stop.id) : undefined,
     name: o.stop?.name ?? "?",
     plannedArrival: o.plannedArrival ?? o.arrival ?? null,
     plannedDeparture: o.plannedDeparture ?? o.departure ?? null,
+    arrival: o.arrival ?? null,
+    departure: o.departure ?? null,
+    cancelled: o.cancelled === true,
   };
 }
 
@@ -141,9 +145,11 @@ export function mapDeparture(d: unknown): NormDeparture {
     direction?: string;
     plannedWhen?: string;
     when?: string;
+    cancelled?: boolean;
   };
   return {
     tripId: o.tripId,
+    cancelled: o.cancelled === true,
     product: o.line?.product,
     lineName: o.line?.name,
     trainNumber: s(o.line?.fahrtNr),

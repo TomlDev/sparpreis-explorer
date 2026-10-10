@@ -526,6 +526,42 @@ export interface TripLeg {
   arrPlatform?: string | null;
   /** Seat reservation on this train ("Wg. 2, Pl. 31 33"). */
   reservation?: string | null;
+  /** What really happened on this train — combined from rtLive and rtOpen (see trips/realtime). */
+  rt?: LegRealtime | null;
+  /** Our own live tracking on the travel day (latest observation) — never overwritten by DB data. */
+  rtLive?: LegRealtime | null;
+  /** DB's open data the day after (DB sometimes corrects its data later). */
+  rtOpen?: LegRealtime | null;
+  /** Every distinct live observation (forecasts included) — append-only evidence. */
+  rtLog?: RtObservation[];
+}
+
+export interface RtObservation {
+  at: number;
+  dep?: string | null;
+  arr?: string | null;
+  depCancelled?: boolean;
+  arrCancelled?: boolean;
+}
+
+export interface LegRealtime {
+  /** Actual departure / arrival (ISO); planned time when the train ran on time. */
+  dep?: string | null;
+  arr?: string | null;
+  depCancelled?: boolean;
+  arrCancelled?: boolean;
+  /** DB delay reason codes (Timetables API). */
+  codes?: string[];
+  /** Train not found in the data (number/station unknown there). */
+  missing?: boolean;
+  /** false = still a forecast (station not polled after the event yet). */
+  final: boolean;
+  source: "opendata" | "live";
+  checkedAt: number;
+  /** DB trip id of the train (live lookups reuse it). */
+  tripId?: string | null;
+  /** Combined value only: what DB's data says now where it differs from what we saw live. */
+  dbLater?: { dep?: string | null; arr?: string | null } | null;
 }
 
 /** What the ticket itself says (from the DB ticket PDF / booking mail). */
@@ -546,6 +582,8 @@ export interface TicketInfo {
   reservationPrice?: number | null;
   /** DB announced a schedule change and lifted the Zugbindung. */
   scheduleChange?: { notifiedAt: string; zugbindungLifted: boolean; text: string } | null;
+  /** Round trip: price of THIS direction (DB lists Hin-/Rückfahrt separately in the account). */
+  directionPrice?: number | null;
 }
 
 export const trips = sqliteTable(

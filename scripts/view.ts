@@ -97,7 +97,7 @@ async function main(): Promise<void> {
     ? (serverSet.find((r) => r.fingerprint === view.refFp) ?? null)
     : null;
   const refLeadKeys = refLeadKeysFor(reference);
-  const timeWin = timeFilterWindow(view.timeFrom, view.timeTo, view.timeMode);
+  const timeWin = view.day ? null : timeFilterWindow(view.timeFrom, view.timeTo, view.timeMode);
   const visible = clientSort(
     clientFilter(serverSet, view.filters, view.refPrice, refLeadKeys, timeWin),
     view.sort,

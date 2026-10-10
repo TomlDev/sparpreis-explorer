@@ -21,6 +21,7 @@ import { WINDOW_LABELS, windowToHHmm } from "@/lib/time";
  *   open            expanded result cards (comma-separated fingerprints)
  *   cmp             compare selection (comma-separated fingerprints)
  *   view            open dialog: filters | calendar | compare
+ *   day=1           whole-day scan (cheapest Flex connection of the day)
  */
 export type TimeMode = "departure" | "arrival";
 export type SearchModeKey = "fast" | "thorough" | "deep";
@@ -41,6 +42,8 @@ export interface ViewState {
   open: string[];
   compare: string[];
   dialog: ViewDialog | null;
+  /** Whole-day scan instead of the time window. */
+  day: boolean;
 }
 
 export const DEFAULT_VIEW: ViewState = {
@@ -58,6 +61,7 @@ export const DEFAULT_VIEW: ViewState = {
   open: [],
   compare: [],
   dialog: null,
+  day: false,
 };
 
 const SORTS: SortMode[] = [
@@ -145,6 +149,7 @@ export function parseView(input: URLSearchParams | string): ViewState {
     open: fpList(q.get("open")),
     compare: fpList(q.get("cmp")).slice(0, 3),
     dialog: dialog && DIALOGS.includes(dialog) ? dialog : null,
+    day: q.get("day") === "1",
   };
 }
 
@@ -168,6 +173,7 @@ export function serializeView(v: ViewState): string {
   if (v.open.length) q.set("open", v.open.join(","));
   if (v.compare.length) q.set("cmp", v.compare.join(","));
   if (v.dialog) q.set("view", v.dialog);
+  if (v.day) q.set("day", "1");
   // URLSearchParams escapes "," and ":" — keep them readable in the link.
   return q.toString().replace(/%2C/gi, ",").replace(/%3A/gi, ":");
 }

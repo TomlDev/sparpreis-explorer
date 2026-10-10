@@ -18,6 +18,7 @@ describe("Ansicht in der URL", () => {
       refPrice: 63.04,
       open: ["6f4394c563dfb9e52f957d98", "a03f1cf5a39f679212b7c48d"],
       compare: ["aa9edfd160b3567faf574e03"],
+      day: true,
       dialog: "filters",
     };
     const q = serializeView(v);

@@ -17,6 +17,10 @@ export interface NormStopover {
   name: string;
   plannedArrival?: string | null;
   plannedDeparture?: string | null;
+  /** Realtime (prognosis or actual) — only from trip / journey details. */
+  arrival?: string | null;
+  departure?: string | null;
+  cancelled?: boolean;
 }
 
 export interface NormLeg {
@@ -79,6 +83,7 @@ export interface NormDeparture {
   direction?: string | null;
   plannedWhen?: string | null;
   when?: string | null;
+  cancelled?: boolean;
 }
 
 export type ProductFilter = Partial<Record<string, boolean>>;

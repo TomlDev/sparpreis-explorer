@@ -29,6 +29,12 @@ describe("Fahrgastrechte-Regeln (laut DB-Merkblatt)", () => {
   it("zahlt unter 4 € nichts aus und halbiert bei Hin- und Rückfahrt", () => {
     expect(assess({ ...base, price: 15, actualArrival: `${T}T09:10:00+02:00` })).toMatchObject({ amount: 3.75, payable: false });
     expect(assess({ ...base, price: 80, roundTrip: true, actualArrival: `${T}T09:10:00+02:00` })).toMatchObject({ amount: 10 });
+    // half of an odd-cent round trip stays in whole cents
+    expect(assess({ ...base, price: 72.73, roundTrip: true, status: "not_started" as const, expectedDelayMin: 75, actualArrival: null })).toMatchObject({ amount: 36.37 });
+    // DB prices the directions separately — the known price of this direction wins
+    expect(
+      assess({ ...base, price: 72.73, roundTrip: true, directionPrice: 51.74, status: "aborted", returnedToStart: true, expectedDelayMin: 75, actualArrival: null }),
+    ).toMatchObject({ amount: 51.74 });
   });
 
   it("erstattet bei Nichtantritt nur mit Zugausfall oder ≥ 60 min Prognose", () => {

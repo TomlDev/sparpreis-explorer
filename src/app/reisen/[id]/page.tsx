@@ -9,7 +9,8 @@ import { Badge, Button, Card, Input, Spinner } from "@/components/ui";
 import { EventDialog } from "@/components/trips/EventDialog";
 import { STATUS, legColor, legLabel, mapsLink, uploadFiles } from "@/components/trips/tripUi";
 import type { AttachmentRow, ClaimRow, TripEventRow, TripRow } from "@/db/schema";
-import { berlinDay, berlinToIso, formatTime } from "@/lib/time";
+import { berlinDay, berlinToIso, formatTime, todayLocal } from "@/lib/time";
+import { delayMin, realtimeSummary, type RealtimeSummary } from "@/lib/trips/realtime";
 import { arrivalDelayMin, assess, liveHints, ticketSpan } from "@/lib/trips/rules";
 import { cn, formatEuro } from "@/lib/utils";
 
@@ -114,6 +115,7 @@ export default function TripPage() {
   }
   const span = ticketSpan(t);
   const tripDays = [t.date, ...(t.plannedArrival ? [berlinDay(t.plannedArrival)] : [])];
+  const rtSum = realtimeSummary(t.legs);
   const delay = arrivalDelayMin(span.arrival, t.actualArrival);
   const ent = assess({
     status: t.status,
@@ -123,6 +125,7 @@ export default function TripPage() {
     expectedDelayMin: t.expectedDelayMin,
     returnedToStart: t.returnedToStart,
     roundTrip: t.roundTrip,
+    directionPrice: t.ticket?.directionPrice ?? null,
   });
   const screenshots = t.attachments.filter((a) => !["claim", "ticket", "decision"].includes(a.kind));
   const tickets = t.attachments.filter((a) => a.kind === "ticket");
@@ -261,13 +264,19 @@ export default function TripPage() {
 
         {/* Timeline with events */}
         <Card className="p-4">
-          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">Verbindung</h2>
+          <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Verbindung</h2>
+            <ActualsControl t={t} sum={rtSum} onLoaded={load} flash={flash} />
+          </div>
           <div className="space-y-2 text-sm">
             {t.legs.map((l, i) => (
               <div key={i}>
                 <div className="flex items-center gap-2">
                   <span className="w-12 shrink-0 tabular-nums font-semibold">{formatTime(l.plannedDeparture)}</span>
                   <span className="truncate">{l.fromName}</span>
+                  {!l.isWalking && (
+                    <RtMark planned={l.plannedDeparture} actual={l.rt?.dep} cancelled={l.rt?.depCancelled} later={l.rt?.dbLater?.dep} />
+                  )}
                 </div>
                 <div className="ml-12 flex flex-wrap items-center gap-2 border-l-2 border-dashed border-border py-1 pl-3">
                   {l.isWalking ? (
@@ -281,11 +290,23 @@ export default function TripPage() {
                     {l.depPlatform ? `Gl. ${l.depPlatform} ` : ""}→ {l.toName} an {formatTime(l.plannedArrival)}
                     {l.arrPlatform ? ` · Gl. ${l.arrPlatform}` : ""}
                   </span>
+                  {!l.isWalking && l.rt?.arr && (
+                    <RtMark planned={l.plannedArrival} actual={l.rt.arr} cancelled={l.rt.arrCancelled} prefix="an" later={l.rt.dbLater?.arr} />
+                  )}
+                  {!!l.rtLog?.length && <LiveLog leg={l} />}
                   {l.reservation && <span className="text-xs font-medium text-primary">Platz: {l.reservation}</span>}
                 </div>
                 {(eventsByLeg.get(i) ?? []).map((e) => (
                   <EventLine key={e.id} e={e} tripId={t.id} tripDays={tripDays} onDeleted={load} onEdit={() => setDialog({ event: e, type: e.type === "note" ? "note" : "control" })} />
                 ))}
+                {rtSum?.missed
+                  .filter((m) => m.afterLeg === i)
+                  .map((m) => (
+                    <p key={m.nextLeg} className="ml-12 border-l-2 border-dashed border-border py-1 pl-3 text-xs font-medium text-danger">
+                      Anschluss in {m.station} verpasst: an {formatTime(m.arrived)}, {legLabel(t.legs[m.nextLeg])} fuhr{" "}
+                      {formatTime(m.departed)}
+                    </p>
+                  ))}
               </div>
             ))}
             <div className="flex items-center gap-2">
@@ -409,6 +430,121 @@ export default function TripPage() {
   );
 }
 
+/** Actual time next to a planned one: "+12" / "pünktlich" / "fällt aus". */
+function RtMark({
+  planned,
+  actual,
+  cancelled,
+  prefix,
+  later,
+}: {
+  planned: string | null;
+  actual?: string | null;
+  cancelled?: boolean;
+  prefix?: string;
+  /** DB's data says something else now than what we saw live. */
+  later?: string | null;
+}) {
+  if (cancelled) return <span className="shrink-0 text-xs font-semibold text-danger">fällt aus</span>;
+  const d = delayMin(planned, actual);
+  if (d == null) return null;
+  return (
+    <span
+      className={cn(
+        "shrink-0 text-xs tabular-nums",
+        d >= 20 ? "font-semibold text-danger" : d >= 5 ? "font-medium text-warning" : "text-success",
+      )}
+      title={`Tatsächlich ${formatTime(actual!)}`}
+    >
+      {prefix ? `${prefix} ` : ""}
+      {formatTime(actual!)}
+      {d !== 0 ? ` (${d > 0 ? "+" : ""}${d})` : ""}
+      {later && (
+        <span className="font-normal text-muted-foreground" title="Von uns live gemessen – die DB-Daten wurden nachträglich geändert">
+          {" "}
+          · DB jetzt {formatTime(later)}
+        </span>
+      )}
+    </span>
+  );
+}
+
+/** Every live observation of one train (forecasts included) — kept as evidence. */
+function LiveLog({ leg }: { leg: Detail["legs"][number] }) {
+  const log = leg.rtLog ?? [];
+  const fmt = (planned: string | null, v: string | null | undefined, cancelled?: boolean) => {
+    if (cancelled) return "fällt aus";
+    const d = delayMin(planned, v);
+    return v ? `${formatTime(v)}${d ? ` (${d > 0 ? "+" : ""}${d})` : ""}` : "–";
+  };
+  return (
+    <details className="w-full text-xs text-muted-foreground">
+      <summary className="cursor-pointer select-none">Live-Verlauf ({log.length} Messungen)</summary>
+      <ul className="mt-1 space-y-0.5 tabular-nums">
+        {log.map((o) => (
+          <li key={o.at}>
+            {new Date(o.at).toLocaleTimeString("de-DE", { timeZone: "Europe/Berlin", hour: "2-digit", minute: "2-digit" })}: ab{" "}
+            {fmt(leg.plannedDeparture, o.dep, o.depCancelled)} · an {fmt(leg.plannedArrival, o.arr, o.arrCancelled)}
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
+/** Source of the actual times / button to load them for a past trip. */
+function ActualsControl({
+  t,
+  sum,
+  onLoaded,
+  flash,
+}: {
+  t: Detail;
+  sum: RealtimeSummary | null;
+  onLoaded: () => void;
+  flash: (m: string, ok?: boolean) => void;
+}) {
+  const [busy, setBusy] = React.useState(false);
+  const today = todayLocal();
+  const past = t.date < today;
+  const rail = t.legs.filter((l) => !l.isWalking && l.product);
+  const open = (past || t.date === today) && rail.some((l) => !(l.rt?.source === "opendata" && l.rt.final));
+  const live = rail.some((l) => l.rt?.source === "live") && !past;
+  if (!open && !sum) return null;
+  return (
+    <span className="flex items-center gap-2 text-xs text-muted-foreground">
+      {sum && (
+        <span title="Quelle: offene Daten der DB-Fahrplanschnittstelle (piebro/deutsche-bahn-data)">
+          {live ? "Live-Daten der DB" : `Ist-Zeiten laut DB${sum.final ? "" : " (vorläufig)"}`}
+        </span>
+      )}
+      {open && (
+        <button
+          className="inline-flex items-center gap-1 text-primary underline disabled:opacity-50"
+          disabled={busy}
+          onClick={async () => {
+            setBusy(true);
+            try {
+              const res = await fetch(`/api/trips/${t.id}/actuals`, { method: "POST" });
+              const d = await res.json().catch(() => ({}));
+              if (!res.ok) flash(d.error ?? "Ist-Zeiten konnten nicht geladen werden", false);
+              else flash("Ist-Zeiten geladen");
+              onLoaded();
+            } catch {
+              flash("Ist-Zeiten konnten nicht geladen werden – keine Verbindung", false);
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          {busy && <Spinner className="h-3 w-3" />}
+          {busy ? "lädt (bis zu 1 Min.) …" : sum ? "aktualisieren" : past ? "Ist-Zeiten laden" : "Live-Daten laden"}
+        </button>
+      )}
+    </span>
+  );
+}
+
 function EventLine({
   e,
   tripId,
@@ -481,6 +617,7 @@ function TicketFields({ t, onSave }: { t: Detail; onSave: (b: Record<string, unk
     ticketType: t.ticketType ?? "",
     direction: t.direction ?? "outbound",
     roundTrip: t.roundTrip,
+    directionPrice: t.ticket?.directionPrice != null ? String(t.ticket.directionPrice).replace(".", ",") : "",
   });
   const [f, setF] = React.useState(fromTrip);
   if (!open)
@@ -490,6 +627,9 @@ function TicketFields({ t, onSave }: { t: Detail; onSave: (b: Record<string, unk
         <span>{t.orderNumber ? `Auftrag ${t.orderNumber}` : "keine Auftragsnummer"}</span>
         {t.ticketType && <span>{t.ticketType}</span>}
         {t.roundTrip && <Badge variant="outline">Hin- und Rückfahrt</Badge>}
+        {t.roundTrip && t.ticket?.directionPrice != null && (
+          <span>diese Richtung {formatEuro(t.ticket.directionPrice)}</span>
+        )}
         <button
           className="text-primary underline"
           onClick={() => {
@@ -518,13 +658,28 @@ function TicketFields({ t, onSave }: { t: Detail; onSave: (b: Record<string, unk
         <input type="checkbox" checked={f.roundTrip} onChange={(e) => setF({ ...f, roundTrip: e.target.checked })} />
         Preis gilt für Hin- und Rückfahrt zusammen
       </label>
+      {f.roundTrip && (
+        <label className="flex flex-col gap-1 text-sm sm:col-span-2">
+          <span className="text-xs text-muted-foreground">
+            Preis dieser Richtung (steht in „Meine Reisen“ auf bahn.de) – sonst rechnet die App mit dem halben Preis
+          </span>
+          <Input
+            placeholder="z. B. 20,99"
+            inputMode="decimal"
+            value={f.directionPrice}
+            onChange={(e) => setF({ ...f, directionPrice: e.target.value })}
+          />
+        </label>
+      )}
       <div className="flex gap-2 sm:col-span-2">
         <Button
           size="sm"
           onClick={async () => {
             const price = f.price.trim() ? Number(f.price.replace(",", ".")) : null;
+            const dir = f.roundTrip && f.directionPrice.trim() ? Number(f.directionPrice.replace(",", ".")) : null;
             const ok = await onSave({
               price: price != null && Number.isFinite(price) ? price : null,
+              directionPrice: dir != null && Number.isFinite(dir) ? dir : null,
               orderNumber: f.orderNumber.trim() || null,
               ticketType: f.ticketType.trim() || null,
               direction: f.direction,
@@ -546,6 +701,7 @@ function TicketFields({ t, onSave }: { t: Detail; onSave: (b: Record<string, unk
 /** Status + what actually happened (actual arrival, abort station, expected delay, free text). */
 function WhatHappened({ t, saved, onSave }: { t: Detail; saved: boolean; onSave: (b: Record<string, unknown>) => Promise<boolean> }) {
   const span = ticketSpan(t);
+  const rt = realtimeSummary(t.legs);
   const stations = Array.from(new Set(t.legs.flatMap((l) => [l.fromName, l.toName])));
   const [status, setStatus] = React.useState(t.status);
   const [arrDate, setArrDate] = React.useState(t.actualArrival ? berlinDate(t.actualArrival) : span.arrival ? berlinDate(span.arrival) : t.date);
@@ -591,6 +747,31 @@ function WhatHappened({ t, saved, onSave }: { t: Detail; saved: boolean; onSave:
         ))}
       </div>
       {hint && <p className="mt-2 text-xs text-muted-foreground">{hint}</p>}
+      {rt?.arrival ? (
+        <p className="mt-2 text-xs">
+          Laut DB-Daten: an {span.to} {formatTime(rt.arrival)}
+          {rt.arrivalDelay ? ` (${rt.arrivalDelay > 0 ? "+" : ""}${rt.arrivalDelay} min)` : " (pünktlich)"}
+          {!rt.final && " – vorläufig"}.{" "}
+          <button
+            type="button"
+            className="font-medium text-primary underline"
+            onClick={() => {
+              setArrDate(berlinDate(rt.arrival!));
+              setArrTime(formatTime(rt.arrival!));
+              setStatus((rt.arrivalDelay ?? 0) > 0 ? "delayed" : "done");
+            }}
+          >
+            Übernehmen
+          </button>
+        </p>
+      ) : rt?.missed.length ? (
+        <p className="mt-2 text-xs">
+          Laut DB-Daten ist dein Anschluss in {rt.missed[0].station} geplatzt – trag ein, wann du wirklich angekommen bist, ob
+          du abgebrochen hast oder gar nicht gefahren bist.
+        </p>
+      ) : rt?.cancelled.length ? (
+        <p className="mt-2 text-xs">Laut DB-Daten ist ein Zug deiner Verbindung ausgefallen.</p>
+      ) : null}
       <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 [&>*]:min-w-0">
         {needsArrival && (
           <label className="flex flex-col gap-1 text-sm">

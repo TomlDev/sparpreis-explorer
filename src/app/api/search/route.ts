@@ -1,5 +1,6 @@
 import { ensureReady } from "@/lib/bootstrap";
 import { type SearchMode } from "@/lib/config";
+import { runDaySearch } from "@/lib/engine/daySearch";
 import { runSearch } from "@/lib/engine/search";
 import { DEFAULT_FILTERS, type SearchFilters, type SearchParams } from "@/lib/engine/types";
 import { todayLocal } from "@/lib/time";
@@ -20,6 +21,8 @@ function normalizeSort(s: unknown): SortMode {
     "least-fv",
     "fewest-transfers",
     "tight-transfers",
+    "unreliable",
+    "cheap-flex",
   ];
   return allowed.includes(s as SortMode) ? (s as SortMode) : "proforma";
 }
@@ -95,7 +98,11 @@ export async function POST(req: Request) {
         send(event);
       };
       try {
-        await runSearch(params, { emit, signal: req.signal });
+        if (body.scope === "day") {
+          // Whole day: the fast mode skips the one-Fernverkehr-leg pricing, so at least "gründlich".
+          const mode = params.mode === "deep" ? "deep" : "thorough";
+          await runDaySearch({ ...params, mode, sort: "cheapest" }, { emit, signal: req.signal });
+        } else await runSearch(params, { emit, signal: req.signal });
       } catch (err) {
         send({ type: "error", message: (err as Error).message, results: [], meta: null });
       } finally {

@@ -1,5 +1,5 @@
 declare module "db-vendo-client" {
-  export function createClient(profile: unknown, userAgent: string): unknown;
+  export function createClient(profile: unknown, userAgent: string, opt?: { enrichStations?: boolean }): unknown;
   export function createBusinessClient(profile: unknown, userAgent: string): unknown;
   export function loadEnrichedStationData(profile: unknown): unknown;
 }

@@ -75,6 +75,9 @@ export interface SearchParams {
   stage?: "normal" | "alternatives" | "full";
   /** Reference price (phase 2): only alternatives cheaper than this are relevant. */
   referencePrice?: number | null;
+  /** One time slot of a whole-day scan: boarding stations already priced at
+   *  other times of the day are priced again (different trains, other price). */
+  daySlot?: boolean;
 }
 
 export interface SearchMeta {

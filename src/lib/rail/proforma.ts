@@ -86,7 +86,8 @@ async function getWebClient(): Promise<WebClient> {
         }
         return req;
       };
-      return createClient(profile as never, userAgent()) as unknown as WebClient;
+      // No db-hafas-stations index (~200 MB heap) — see dbVendo.ts.
+      return createClient(profile as never, userAgent(), { enrichStations: false }) as unknown as WebClient;
     })();
   }
   return clientPromise;

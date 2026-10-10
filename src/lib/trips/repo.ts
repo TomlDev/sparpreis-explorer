@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { and, asc, desc, eq, gte, lte } from "drizzle-orm";
 import { db } from "@/db/client";
+import { carryRealtime } from "./realtime";
 import {
   attachments,
   claims,
@@ -148,7 +149,12 @@ export function updateTrip(id: string, patch: Partial<Pick<TripRow, Editable>>):
   const set: Partial<TripRow> = { updatedAt: now() };
   for (const k of EDITABLE) if (patch[k] !== undefined) (set as Record<string, unknown>)[k] = patch[k];
   if (set.status && !(TRIP_STATUSES as readonly string[]).includes(set.status)) throw new Error("ungültiger Status");
-  if (set.legs) Object.assign(set, summary(set.legs), { date: dayOf(summary(set.legs).plannedDeparture) ?? undefined });
+  if (set.legs) {
+    // Re-import / edit: what we tracked on the same trains stays (live observations are evidence).
+    const before = db.select({ legs: trips.legs }).from(trips).where(eq(trips.id, id)).get();
+    if (before) set.legs = carryRealtime(before.legs, set.legs);
+    Object.assign(set, summary(set.legs), { date: dayOf(summary(set.legs).plannedDeparture) ?? undefined });
+  }
   db.update(trips).set(set).where(eq(trips.id, id)).run();
   return db.select().from(trips).where(eq(trips.id, id)).get() ?? null;
 }
@@ -371,6 +377,8 @@ export function mergeTrips(keepId: string, dropId: string): TripRow | null {
   if (!keep.returnedToStart && drop.returnedToStart) patch.returnedToStart = true;
   if (!keep.roundTrip && drop.roundTrip) patch.roundTrip = true;
   if (drop.notes) patch.notes = keep.notes ? `${keep.notes}\n${drop.notes}` : drop.notes;
+  const legs = carryRealtime(drop.legs, keep.legs);
+  if (JSON.stringify(legs) !== JSON.stringify(keep.legs)) patch.legs = legs;
   if (Object.keys(patch).length) db.update(trips).set({ ...patch, updatedAt: now() }).where(eq(trips.id, keepId)).run();
   deleteTrip(dropId);
   return db.select().from(trips).where(eq(trips.id, keepId)).get() ?? null;

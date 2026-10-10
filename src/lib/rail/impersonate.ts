@@ -109,6 +109,22 @@ interface ReqData {
  * original (transformReqBody/transformReq + header defaults + error check) but
  * routes the actual HTTP call through the impersonating transport.
  */
+/**
+ * Query string the way db-vendo-client's own request does it (qs, arrayFormat
+ * "brackets", values encoded): undefined/null are left out instead of being
+ * sent as "undefined", arrays become `key[]=a&key[]=b` (bahn.de rejects
+ * "a,b" for e.g. verkehrsmittel with HTTP 422).
+ */
+export function queryString(query: Record<string, unknown> | null | undefined): string {
+  const parts: string[] = [];
+  for (const [k, v] of Object.entries(query ?? {})) {
+    if (v === undefined || v === null) continue;
+    if (Array.isArray(v)) for (const x of v) parts.push(`${k}[]=${encodeURIComponent(String(x))}`);
+    else parts.push(`${k}=${encodeURIComponent(String(v))}`);
+  }
+  return parts.join("&");
+}
+
 export function makeImpersonatingRequest(impersonate = process.env.DB_IMPERSONATE_TARGET || "chrome") {
   return async function request(ctx: Ctx, userAgent: string, reqData: ReqData) {
     const { profile, opt } = ctx;
@@ -129,10 +145,8 @@ export function makeImpersonatingRequest(impersonate = process.env.DB_IMPERSONAT
     }) as { method: string; body?: string; headers: Record<string, string>; query?: Record<string, string> | null };
 
     let url = endpoint + (reqData.path || "");
-    if (reqOptions.query && Object.keys(reqOptions.query).length) {
-      const qs = new URLSearchParams(reqOptions.query as Record<string, string>).toString();
-      url += (url.includes("?") ? "&" : "?") + qs;
-    }
+    const qs = queryString(reqOptions.query);
+    if (qs) url += (url.includes("?") ? "&" : "?") + qs;
 
     const res = await callImpersonate({
       method: reqOptions.method,

@@ -36,6 +36,7 @@ export async function POST(req: Request, { params }: Ctx) {
     expectedDelayMin,
     returnedToStart: trip.returnedToStart,
     roundTrip: trip.roundTrip,
+    directionPrice: trip.ticket?.directionPrice ?? null,
   });
   if (!ent) return NextResponse.json({ error: "Für diese Fahrt besteht laut den DB-Regeln kein Anspruch." }, { status: 400 });
   if (!ent.payable) return NextResponse.json({ error: ent.caveats[0] ?? "Laut den DB-Regeln wird hier nichts ausgezahlt." }, { status: 400 });

@@ -43,16 +43,25 @@ async function getClient() {
   if (!clientPromise) {
     clientPromise = (async () => {
       const { createClient } = await import("db-vendo-client");
-      // dbnav = DB Navigator mobile API (single Akamai host, has prices/tickets).
-      const { profile } = await import("db-vendo-client/p/dbnav/index.js");
+      // dbweb = bahn.de web API (default). The DB Navigator app API (dbnav) answers
+      // every request with 452 (Akamai block) since Oct 2026 — DB_VENDO_PROFILE=dbnav
+      // switches back should that change.
+      const useNav = (process.env.DB_VENDO_PROFILE || "").toLowerCase() === "dbnav";
+      const { profile } = useNav
+        ? await import("db-vendo-client/p/dbnav/index.js")
+        : await import("db-vendo-client/p/dbweb/index.js");
       // Route the network call through the TLS-impersonating transport so
       // Akamai does not block us (OPS_BLOCKED / 452). Set before createClient.
       (profile as { request?: unknown }).request = makeImpersonatingRequest();
-      // db-vendo-client only maps a SINGLE `opt.via`, but DB's mobile API takes a
-      // `viaLocations` array (multiple Zwischenhalte, like DB Navigator, optionally
-      // with an Aufenthalt/dwell at the first). Wrap formatJourneysReq to inject it.
-      type FmtCtx = { opt?: { viaList?: string[]; viaStopMinutes?: number } };
-      type FmtReq = { body?: { reiseHin?: { wunsch?: Record<string, unknown> } } };
+      // db-vendo-client only maps a SINGLE `opt.via`, but both APIs take a list of
+      // Zwischenhalte (like DB Navigator / bahn.de, optionally with an Aufenthalt at
+      // the first). Wrap formatJourneysReq to inject it.
+      type Loc = { lid?: string };
+      type FmtCtx = {
+        opt?: { viaList?: string[]; viaStopMinutes?: number };
+        profile?: { formatLocation: (p: unknown, id: string, name: string) => Loc };
+      };
+      type FmtReq = { body?: { reiseHin?: { wunsch?: Record<string, unknown> }; zwischenhalte?: unknown } };
       const prof = profile as unknown as {
         formatJourneysReq: (ctx: FmtCtx, ...rest: unknown[]) => FmtReq;
       };
@@ -60,17 +69,21 @@ async function getClient() {
       prof.formatJourneysReq = (ctx: FmtCtx, ...rest: unknown[]): FmtReq => {
         const req = origFormat(ctx, ...rest);
         const list = ctx?.opt?.viaList;
-        const wunsch = req?.body?.reiseHin?.wunsch;
-        if (Array.isArray(list) && list.length && wunsch) {
-          const stay = ctx.opt?.viaStopMinutes;
-          wunsch.viaLocations = list.map((locationId, i) => ({
-            locationId,
-            ...(stay && i === 0 ? { aufenthaltsdauer: stay } : {}),
-          }));
+        if (!Array.isArray(list) || !list.length || !req?.body) return req;
+        const stay = ctx.opt?.viaStopMinutes;
+        const dwell = (i: number) => (stay && i === 0 ? { aufenthaltsdauer: stay } : {});
+        if (useNav) {
+          const wunsch = req.body.reiseHin?.wunsch;
+          if (wunsch) wunsch.viaLocations = list.map((locationId, i) => ({ locationId, ...dwell(i) }));
+        } else if (ctx.profile) {
+          const p = ctx.profile;
+          req.body.zwischenhalte = list.map((id, i) => ({ id: p.formatLocation(p, id, "opt.viaList").lid, ...dwell(i) }));
         }
         return req;
       };
-      const client = createClient(profile as never, userAgent()) as unknown as HafasClient;
+      // enrichStations would load db-hafas-stations (340k stops, ~200 MB heap) for
+      // station extras the app never reads — coordinates come with the responses.
+      const client = createClient(profile as never, userAgent(), { enrichStations: false }) as unknown as HafasClient;
       const validProducts = new Set<string>(
         ((profile as { products?: Array<{ id: string }> }).products || []).map(
           (p) => p.id,
