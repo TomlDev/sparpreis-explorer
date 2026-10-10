@@ -199,15 +199,23 @@ export function ResultCard({
   // Always via the app: it knows the BahnCard / class, resolves the bahn.de ids (also for
   // results from the cache) and rebuilds the search that produced the shown price.
   const how = r.priceHow ?? (r.resultKind === "proforma" ? "proforma" : r.resultKind === "alternative" ? "via" : "plain");
-  const withFv = (how === "proforma" || how === "via") && r.metrics.fvLegs === 1 && r.headlineFv;
+  // "Früher aussteigen": the ticket to book is the one to the farther destination
+  const ee = r.earlyExit;
+  const fv = ee
+    ? ee.fvLegs === 1 && ee.fvFrom && ee.fvTo
+      ? { fvFrom: ee.fvFrom, fvTo: ee.fvTo }
+      : null
+    : r.metrics.fvLegs === 1 && r.headlineFv
+      ? { fvFrom: r.headlineFv.fromName, fvTo: r.headlineFv.toName }
+      : null;
   // Only transfers inside the ticket count as "knappster Umstieg" (tight ones before it: see Itinerary).
   const tightest = effectiveMinTransfer(r);
   const dbHref = `/api/dblink?${new URLSearchParams({
-    from: m.originName,
-    to: m.destinationName,
+    from: ee?.ticketFrom ?? m.originName,
+    to: ee?.ticketTo ?? m.destinationName,
     ...(m.plannedDeparture ? { dep: m.plannedDeparture } : {}),
     ...(how !== "plain" ? { kind: how } : {}),
-    ...(withFv ? { fvFrom: r.headlineFv!.fromName, fvTo: r.headlineFv!.toName } : {}),
+    ...((how === "proforma" || how === "via") && fv ? fv : {}),
   })}`;
 
   return (
@@ -236,10 +244,16 @@ export function ResultCard({
             <div className="truncate text-xs text-muted-foreground">
               {m.originName} → {m.destinationName}
             </div>
-            {!!r.coverage.uncoveredLegs?.length && (
-              <div className="mt-0.5 text-xs text-muted-foreground">
-                🎫 Ticket gilt {r.coverage.offerFromName} → {r.coverage.offerToName}
+            {ee ? (
+              <div className="mt-0.5 text-xs font-medium text-primary">
+                🚪 Früher aussteigen: Ticket bis {ee.ticketTo}, du steigst in {m.destinationName} aus
               </div>
+            ) : (
+              !!r.coverage.uncoveredLegs?.length && (
+                <div className="mt-0.5 text-xs text-muted-foreground">
+                  🎫 Ticket gilt {r.coverage.offerFromName} → {r.coverage.offerToName}
+                </div>
+              )
             )}
             <div className="mt-1.5">
               <ChainPills legs={r.legs} />

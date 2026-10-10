@@ -27,9 +27,20 @@ export async function POST(req: Request) {
   const body = await req.json().catch(() => ({}));
   const action = body?.action;
   switch (action) {
-    case "create":
-      createProfile(String(body.key), String(body.label));
+    case "create": {
+      const label = String(body.label ?? "").trim().slice(0, 60);
+      // key from the name: "Freiburg (Breisgau)" → "freiburg-breisgau"
+      const key = (String(body.key ?? "") || label)
+        .toLowerCase()
+        .replace(/ä/g, "ae").replace(/ö/g, "oe").replace(/ü/g, "ue").replace(/ß/g, "ss")
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "")
+        .slice(0, 40);
+      if (!label || !key) return NextResponse.json({ error: "Name fehlt" }, { status: 400 });
+      if (listProfiles().some((p) => p.key === key)) return NextResponse.json({ error: "Gibt es schon" }, { status: 400 });
+      createProfile(key, label);
       break;
+    }
     case "addStation":
       addStation(
         String(body.profileId),

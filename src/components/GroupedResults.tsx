@@ -105,6 +105,7 @@ function CompactRow({ r, onOpen }: { r: SearchResult; onOpen: () => void }) {
         </div>
         <div className="truncate text-xs text-muted-foreground">
           {m.originName} → {m.destinationName}
+          {r.earlyExit && <span className="font-medium text-primary"> · 🚪 Ticket bis {r.earlyExit.ticketTo}</span>}
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-1.5">

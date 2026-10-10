@@ -181,6 +181,8 @@ export default function SettingsPage() {
           </Card>
         ))}
 
+        <NewProfile onCreate={(label) => post({ action: "create", label })} />
+
         <DelayDataCard />
 
         {/* Favorites */}
@@ -408,6 +410,33 @@ function StationRow({
         </div>
       )}
     </div>
+  );
+}
+
+/** A new start / destination (e.g. "Freiburg") — then add its stations in its card. */
+function NewProfile({ onCreate }: { onCreate: (label: string) => void }) {
+  const [label, setLabel] = React.useState("");
+  return (
+    <Card className="p-4">
+      <h2 className="mb-1 text-sm font-semibold uppercase tracking-wide text-muted-foreground">Neues Profil</h2>
+      <p className="mb-2 text-xs text-muted-foreground">
+        Start oder Ziel für die Suche anlegen (z. B. „Freiburg“), danach hier die Haltestelle hinzufügen.
+      </p>
+      <div className="flex gap-2">
+        <Input placeholder="Name, z. B. Freiburg" value={label} onChange={(e) => setLabel(e.target.value)} />
+        <Button
+          variant="outline"
+          onClick={() => {
+            if (label.trim()) {
+              onCreate(label.trim());
+              setLabel("");
+            }
+          }}
+        >
+          <Plus className="h-4 w-4" />
+        </Button>
+      </div>
+    </Card>
   );
 }
 

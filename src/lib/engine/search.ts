@@ -1,4 +1,5 @@
 import { eq, like } from "drizzle-orm";
+import { earlyExitResults } from "./earlyExit";
 import { db } from "@/db/client";
 import { journeyQueries, searchRuns } from "@/db/schema";
 import { newId, now } from "@/db/util";
@@ -282,6 +283,14 @@ export async function runSearch(params: SearchParams, opts: RunOptions): Promise
     })
     .run();
 
+  // Tickets to farther destinations (searched before, same start + day) whose trains stop here.
+  let earlyExits: SearchResult[] = [];
+  try {
+    earlyExits = earlyExitResults(params);
+  } catch {
+    /* best effort */
+  }
+
   // Late slots and pro-forma searches also return the next morning's trains — only
   // the searched day counts (departure day; arrival day when searching by arrival).
   const onTravelDay = (r: SearchResult): boolean => {
@@ -334,8 +343,14 @@ export async function runSearch(params: SearchParams, opts: RunOptions): Promise
       r.isProformaWin =
         r.resultKind === "proforma" && p != null && anchorPrice != null && p < anchorPrice;
     }
-    annotateReliability(collected.values(), params.travelDate);
-    return rankResults(applyFilters([...collected.values()].filter(onTravelDay), params.filters), params.sort);
+    // "Früher aussteigen" from other destinations' tickets — unless a direct ticket for the same trains is as cheap
+    const extra = earlyExits.filter((e) => {
+      const direct = collected.get(e.earlyExit!.baseFingerprint);
+      return !(direct?.coverage.price != null && direct.coverage.price <= (e.coverage.price ?? Infinity));
+    });
+    const all = [...collected.values(), ...extra];
+    annotateReliability(all, params.travelDate);
+    return rankResults(applyFilters(all.filter(onTravelDay), params.filters), params.sort);
   };
 
   const ingest = (

@@ -66,6 +66,20 @@ export interface SearchResult {
   resultKind: ResultKind;
   /** How the shown price was found — the kind alone can be "normal" for a pro-forma price. */
   priceHow?: PriceHow | null;
+  /**
+   * "Früher aussteigen": a ticket bought for a farther destination (from a search
+   * to another place) whose trains pass this one — same price, you just leave
+   * the train earlier. The ticket itself (and passenger rights) is the far one.
+   */
+  earlyExit?: {
+    ticketFrom: string;
+    ticketTo: string;
+    fvFrom: string | null;
+    fvTo: string | null;
+    fvLegs: number;
+    /** Fingerprint of the shortened trip (to compare with a direct ticket for it). */
+    baseFingerprint: string;
+  } | null;
   /** € cheaper than the day's anchor/best price (positive = cheaper). */
   savingsVsAnchor: number | null;
   /** true when a pro-forma candidate actually beats the anchor. */
