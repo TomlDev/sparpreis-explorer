@@ -1,4 +1,5 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
+import { getPreferences } from "./settings";
 import { db } from "@/db/client";
 import {
   journeyLegs,
@@ -154,10 +155,15 @@ export function loadJourney(fp: string): NormJourney | null {
             fullRoute: offer.isFullRoute,
             hint: null,
             how: (offer.raw as { how?: "plain" | "lowfv" | "via" | "proforma" } | null)?.how,
+            spanChecked: (offer.raw as { spanChecked?: boolean } | null)?.spanChecked,
           }
         : null,
+    // Offer names are the ticket's span only when checked (or a known partial) — otherwise they
+    // just repeat the trip's endpoints and would pass for "checked".
     ticketInfo:
-      offer && (offer.offerFromName || offer.offerToName)
+      offer &&
+      (offer.offerFromName || offer.offerToName) &&
+      ((offer.raw as { spanChecked?: boolean } | null)?.spanChecked || !offer.isFullRoute)
         ? {
             fromName: offer.offerFromName ?? undefined,
             toName: offer.offerToName ?? undefined,
@@ -196,6 +202,7 @@ export function loadResults(fps: string[]): SearchResult[] {
         // Rows from before result_kind existed are unknown — never claim them
         // as DB originals; a plain search re-finding them upgrades them.
         resultKind: (row.resultKind as ResultKind | null) ?? "alternative",
+        deutschlandTicket: getPreferences().deutschlandTicket,
       }),
     );
   }

@@ -1,4 +1,5 @@
 import { cheapFlexOrder, flexOrder, type SortMode } from "@/lib/domain/ranking";
+import { effectiveMinTransfer } from "@/lib/domain/ticketTransfers";
 import type { SearchResult } from "@/lib/domain/result";
 import type { SearchFilters } from "@/lib/engine/types";
 import { formatTime, toMin } from "@/lib/time";
@@ -120,8 +121,9 @@ export function filterReason(r: SearchResult, ctx: FilterContext): string | null
     return `zu viele ICE-Minuten (${m.fvMinutes} > ${f.maxFvMinutes})`;
   if (f.maxFvStops != null && m.fvStops > f.maxFvStops)
     return `zu viele ICE-Halte (${m.fvStops} > ${f.maxFvStops})`;
-  if (f.minTransferMin != null && m.minTransferMin != null && m.minTransferMin < f.minTransferMin)
-    return `Umstieg zu knapp (${m.minTransferMin} < ${f.minTransferMin} min)`;
+  const tight = effectiveMinTransfer(r);
+  if (f.minTransferMin != null && tight != null && tight < f.minTransferMin)
+    return `Umstieg zu knapp (${tight} < ${f.minTransferMin} min)`;
   if (f.minFlexPct != null && f.minFlexPct > 0) {
     const flex = r.reliability?.flexPct;
     if (flex == null) return "keine Pünktlichkeitsdaten (Flex-Filter)";
@@ -160,7 +162,7 @@ export function clientSort(results: SearchResult[], mode: SortMode): SearchResul
     fastest: (a, b) => a.metrics.durationMin - b.metrics.durationMin,
     "least-fv": (a, b) => a.metrics.fvMinutes - b.metrics.fvMinutes || price(a, 1e9) - price(b, 1e9),
     "fewest-transfers": (a, b) => a.metrics.transfers - b.metrics.transfers || price(a, 1e9) - price(b, 1e9),
-    "tight-transfers": (a, b) => (a.metrics.minTransferMin ?? 1e9) - (b.metrics.minTransferMin ?? 1e9),
+    "tight-transfers": (a, b) => (effectiveMinTransfer(a) ?? 1e9) - (effectiveMinTransfer(b) ?? 1e9),
     unreliable: (a, b) => flexOrder(a, b) || price(a, 1e9) - price(b, 1e9),
     "cheap-flex": (a, b) => price(a, 1e9) - price(b, 1e9) || flexOrder(a, b),
   };

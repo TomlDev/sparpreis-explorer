@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { effectiveMinTransfer, ticketTransfers } from "@/lib/domain/ticketTransfers";
 import {
   ArrowUpRight,
   CalendarPlus,
@@ -199,6 +200,11 @@ export function ResultCard({
   // results from the cache) and rebuilds the search that produced the shown price.
   const how = r.priceHow ?? (r.resultKind === "proforma" ? "proforma" : r.resultKind === "alternative" ? "via" : "plain");
   const withFv = (how === "proforma" || how === "via") && r.metrics.fvLegs === 1 && r.headlineFv;
+  // Only transfers inside the ticket count as "knappster Umstieg"; tight ones before it are a risk of their own.
+  const tightest = effectiveMinTransfer(r);
+  const unprotected = r.coverage.uncoveredLegs?.length
+    ? ticketTransfers(r.legs, r.coverage.uncoveredLegs).unprotected.filter((u) => u.where === "before" && u.risky)
+    : [];
   const dbHref = `/api/dblink?${new URLSearchParams({
     from: m.originName,
     to: m.destinationName,
@@ -227,12 +233,23 @@ export function ResultCard({
               </span>
               <span className="text-xs text-muted-foreground">
                 {formatDuration(m.durationMin)} · {m.transfers} Umst.
-                {m.minTransferMin != null ? ` · knappster ${m.minTransferMin} min` : ""}
+                {tightest != null ? ` · knappster ${tightest} min` : ""}
               </span>
             </div>
             <div className="truncate text-xs text-muted-foreground">
               {m.originName} → {m.destinationName}
             </div>
+            {!!r.coverage.uncoveredLegs?.length && (
+              <div className="mt-0.5 text-xs text-muted-foreground">
+                🎫 Ticket gilt {r.coverage.offerFromName} → {r.coverage.offerToName}
+                {unprotected.map((u, i) => (
+                  <span key={i} className="block font-medium text-warning">
+                    ⚠ {u.minutes} min Umstieg in {u.station} vor Ticketbeginn – nicht geschützt: verpasst du dadurch den ersten
+                    Zug, gilt das Ticket nicht mehr
+                  </span>
+                ))}
+              </div>
+            )}
             <div className="mt-1.5">
               <ChainPills legs={r.legs} />
             </div>
@@ -374,7 +391,7 @@ export function ResultCard({
 
       {open && (
         <div className="border-t border-border bg-muted/30 p-4 sm:p-5">
-          <Itinerary legs={r.legs} reliability={r.reliability} />
+          <Itinerary legs={r.legs} reliability={r.reliability} uncovered={r.coverage.uncoveredLegs} />
           <ReliabilityDetails rel={r.reliability} />
 
           {history && history.length > 1 && (
@@ -483,7 +500,7 @@ function ChainPills({ legs }: { legs: Leg[] }) {
 }
 
 /** Expanded plan — DB-style vertical timeline (time · node/line · station/train). */
-function Itinerary({ legs, reliability }: { legs: Leg[]; reliability?: SearchResult["reliability"] }) {
+function Itinerary({ legs, reliability, uncovered }: { legs: Leg[]; reliability?: SearchResult["reliability"]; uncovered?: number[] }) {
   const last = legs[legs.length - 1];
   return (
     <div className="text-sm">
@@ -541,6 +558,9 @@ function Itinerary({ legs, reliability }: { legs: Leg[]; reliability?: SearchRes
                       {leg.durationMin} min
                       {leg.stops > 0 ? ` · ${leg.stops} ${leg.stops === 1 ? "Zwischenhalt" : "Zwischenhalte"}` : ""}
                     </span>
+                    {uncovered?.includes(i) && (
+                      <span className="rounded border border-border px-1.5 py-0.5 text-[11px] text-muted-foreground">nicht im Ticket</span>
+                    )}
                   </div>
                 )}
               </div>

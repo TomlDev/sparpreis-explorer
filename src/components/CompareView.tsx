@@ -1,6 +1,7 @@
 "use client";
 
 import { Sheet } from "@/components/Sheet";
+import { effectiveMinTransfer } from "@/lib/domain/ticketTransfers";
 import type { SearchResult } from "@/lib/domain/result";
 import { formatTime } from "@/lib/time";
 import { formatDuration, formatEuro } from "@/lib/utils";
@@ -25,7 +26,7 @@ export function CompareView({
     { label: "Umstiege", render: (r) => String(r.metrics.transfers) },
     {
       label: "knappster Umstieg",
-      render: (r) => (r.metrics.minTransferMin != null ? `${r.metrics.minTransferMin} min` : "–"),
+      render: (r) => (effectiveMinTransfer(r) != null ? `${effectiveMinTransfer(r)} min` : "–"),
     },
     {
       label: "Ticket",

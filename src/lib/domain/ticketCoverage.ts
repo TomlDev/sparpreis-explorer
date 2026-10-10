@@ -1,4 +1,5 @@
-import type { NormJourney } from "@/lib/rail/types";
+import type { NormJourney, NormLeg } from "@/lib/rail/types";
+import { isLongDistanceProduct } from "./products";
 
 // green = confirmed through-ticket, yellow = uncertain, red = partial fare,
 // unpriced = schedule found but price not checked (MOTIS-only / pricing offline),
@@ -14,6 +15,34 @@ export interface CoverageResult {
   klasse: number;
   offerFromName: string | null;
   offerToName: string | null;
+  /** Legs the ticket doesn't cover (tram / bus before or after DB's tariff area). */
+  uncoveredLegs?: number[];
+}
+
+const TRAIN = new Set(["nationalExpress", "national", "regionalExpress", "regional", "suburban"]);
+
+/**
+ * Which legs lie outside the ticket's span: before the leg leaving from its
+ * start station and after the leg arriving at its end station. null when the
+ * span's stations aren't in the journey at all.
+ */
+export function uncoveredLegs(legs: NormLeg[], from: string, to: string): number[] | null {
+  // exact name first — the loose match would take "Essen Hbf" for "Essen-Steele"
+  const exact = (a: string, b: string) => normStationName(a) === normStationName(b);
+  const find = (match: (a: string, b: string) => boolean) => {
+    const iStart = legs.findIndex((l) => !l.isWalking && match(l.origin.name, from));
+    let iEnd = -1;
+    for (let i = legs.length - 1; i >= 0; i--)
+      if (!legs[i].isWalking && match(legs[i].destination.name, to)) {
+        iEnd = i;
+        break;
+      }
+    return { iStart, iEnd };
+  };
+  let { iStart, iEnd } = find(exact);
+  if (iStart < 0 || iEnd < 0) ({ iStart, iEnd } = find(sameStation));
+  if (iStart < 0 || iEnd < 0 || iEnd < iStart) return null;
+  return legs.flatMap((l, i) => ((i < iStart || i > iEnd) && !l.isWalking ? [i] : []));
 }
 
 /** Normalize a station name for loose comparison. */
@@ -54,6 +83,7 @@ function stationsRelated(a?: string | null, b?: string | null): boolean {
 export function assessCoverage(
   journey: NormJourney,
   expected?: { fromName?: string; toName?: string },
+  opts: { deutschlandTicket?: boolean } = {},
 ): CoverageResult {
   const price = journey.price;
   const legs = journey.legs;
@@ -112,18 +142,28 @@ export function assessCoverage(
         klasse: info?.klasse ?? 2,
         offerFromName: offerFrom,
         offerToName: offerTo,
+        uncoveredLegs: [],
       };
     }
-    return {
-      coverage: "red",
-      reason: describePartial(offerFrom, offerTo),
-      isFullRoute: false,
-      price: price.amount,
-      currency: price.currency,
-      klasse: info?.klasse ?? 2,
-      offerFromName: offerFrom,
-      offerToName: offerTo,
-    };
+    // A Teilpreis that only leaves out tram / bus at the ends is the normal ticket
+    // (it covers every train); a train outside the span is not.
+    const out = uncoveredLegs(legs, offerFrom, offerTo);
+    const outside = (out ?? []).map((i) => legs[i]);
+    const base = { price: price.amount, currency: price.currency, klasse: info?.klasse ?? 2, offerFromName: offerFrom, offerToName: offerTo, uncoveredLegs: out ?? undefined };
+    // A train outside the span isn't covered: no ticket for the trip — unless it's a
+    // regional train and the user has a Deutschlandticket.
+    const trainsOut = outside.filter((l) => TRAIN.has(l.product ?? ""));
+    if (out && !trainsOut.some((l) => isLongDistanceProduct(l.product)) && (!trainsOut.length || opts.deutschlandTicket)) {
+      return {
+        ...base,
+        coverage: "green",
+        reason: trainsOut.length
+          ? `Ticket gilt ${offerFrom} → ${offerTo} – der Rest mit deinem Deutschlandticket`
+          : `Ticket gilt ${offerFrom} → ${offerTo} – Straßenbahn/Bus davor/danach nicht enthalten`,
+        isFullRoute: true,
+      };
+    }
+    return { ...base, coverage: "red", reason: describePartial(offerFrom, offerTo), isFullRoute: false };
   }
 
   // Provider priced the through connection — but only trust it as green if the

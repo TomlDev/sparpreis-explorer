@@ -26,11 +26,12 @@ export function annotateReliability(results: Iterable<SearchResult>, travelDate:
   const ctx = { travelDate, months: activeMonths(), weights: getWeights() };
   const src = { resolveEva, rows: statRows };
   for (const r of results) {
-    const key = `${travelDate}|${r.fingerprint}`;
+    const uncovered = r.coverage.uncoveredLegs?.filter((i) => r.legs[i] && !r.legs[i].isWalking);
+    const key = `${travelDate}|${r.fingerprint}|${uncovered?.join(",") ?? ""}`;
     if (!memo.has(key)) {
       let rel: Reliability | null = null;
       try {
-        rel = computeReliability(r.legs, src, ctx);
+        rel = computeReliability(r.legs, src, ctx, uncovered);
       } catch {
         rel = null;
       }

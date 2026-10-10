@@ -2,6 +2,7 @@ import { userAgent } from "@/lib/config";
 import { getLimiter, normalizeError } from "./rateLimiter";
 import { makeImpersonatingRequest } from "./impersonate";
 import { mapDeparture, mapJourney, mapLocation, mapTrip } from "./hafasMap";
+import { withOfferSpan } from "./offerSpan";
 import {
   type NormDeparture,
   type NormJourney,
@@ -53,6 +54,8 @@ async function getClient() {
       // Route the network call through the TLS-impersonating transport so
       // Akamai does not block us (OPS_BLOCKED / 452). Set before createClient.
       (profile as { request?: unknown }).request = makeImpersonatingRequest();
+      // where the ticket is valid (offer details) → NormJourney.ticketInfo
+      await withOfferSpan(profile);
       // db-vendo-client only maps a SINGLE `opt.via`, but both APIs take a list of
       // Zwischenhalte (like DB Navigator / bahn.de, optionally with an Aufenthalt at
       // the first). Wrap formatJourneysReq to inject it.
@@ -249,19 +252,24 @@ export class DbVendoProvider implements RailProvider {
 
   async refreshJourney(
     refreshToken: string,
-    opts?: { tickets?: boolean; stopovers?: boolean },
+    opts?: { tickets?: boolean; stopovers?: boolean; bahncard?: string | null; klasse?: 1 | 2; deutschlandTicket?: boolean },
   ): Promise<NormJourney> {
-    const key = `refresh:${refreshToken}`;
+    const key = `refresh:${refreshToken}:${opts?.bahncard ?? ""}:${opts?.klasse ?? 2}`;
     return this.limiter.dedupe(key, async () => {
       try {
         const { client } = await getClient();
+        const loyaltyCard = mapBahncard(opts?.bahncard ?? null, opts?.klasse ?? 2);
         const res = await client.refreshJourney(refreshToken, {
           tickets: opts?.tickets ?? true,
           stopovers: opts?.stopovers ?? true,
           remarks: false,
           polylines: false,
+          ...(loyaltyCard ? { loyaltyCard } : {}),
+          ...(opts?.klasse ? { firstClass: opts.klasse === 1 } : {}),
+          ...(opts?.deutschlandTicket ? { deutschlandTicketDiscount: true } : {}),
         });
-        return mapJourney(res);
+        // db-vendo returns { journey, … }
+        return mapJourney((res as { journey?: unknown }).journey ?? res);
       } catch (err) {
         throw normalizeError(err);
       }

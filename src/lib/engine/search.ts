@@ -8,7 +8,8 @@ import { isLongDistanceProduct } from "@/lib/domain/products";
 import { resolveRichId, searchProforma } from "@/lib/rail/proforma";
 import { rankResults } from "@/lib/domain/ranking";
 import { buildResult, isOriginalKind, type PriceHow, type SearchResult } from "@/lib/domain/result";
-import { normStationName } from "@/lib/domain/ticketCoverage";
+import { assessCoverage, normStationName } from "@/lib/domain/ticketCoverage";
+import { effectiveMinTransfer } from "@/lib/domain/ticketTransfers";
 import {
   getPricingProvider,
   getRoutingProvider,
@@ -16,7 +17,7 @@ import {
   type RailProvider,
 } from "@/lib/rail/provider";
 import { ProviderError, type NormJourney, type ProductFilter } from "@/lib/rail/types";
-import { loadResults, saveJourneyResult } from "@/lib/repo/journeys";
+import { loadJourney, loadResults, saveJourneyResult } from "@/lib/repo/journeys";
 import { getProfile, resolveStation, searchableStations, type RouteProfile } from "@/lib/routeProfiles";
 import { upsertLocation } from "@/lib/repo/locations";
 import { localDeparture } from "@/lib/time";
@@ -123,8 +124,8 @@ export function applyFilters(results: SearchResult[], f: SearchFilters): SearchR
     if (f.maxTransfers != null && m.transfers > f.maxTransfers) return false;
     if (f.maxFvMinutes != null && m.fvMinutes > f.maxFvMinutes) return false;
     if (f.maxFvStops != null && m.fvStops > f.maxFvStops) return false;
-    if (f.minTransferMin != null && m.minTransferMin != null && m.minTransferMin < f.minTransferMin)
-      return false;
+    const tight = effectiveMinTransfer(r);
+    if (f.minTransferMin != null && tight != null && tight < f.minTransferMin) return false;
     return true;
   });
 }
@@ -348,6 +349,7 @@ export async function runSearch(params: SearchParams, opts: RunOptions): Promise
       source,
       expected,
       resultKind,
+      deutschlandTicket: prefs.deutschlandTicket,
       priceCheckedAt: journey.price ? now() : null,
       timetableAt: now(),
     });
@@ -945,6 +947,44 @@ export async function runSearch(params: SearchParams, opts: RunOptions): Promise
         await priceNow();
         await priceTrueProforma();
       }
+    }
+
+    // ---- Where are the cheapest tickets valid? DB marks trips from a tram / bus
+    // stop as "Teilpreis"; only the offer details name the span ("gilt nur für
+    // Essen-Steele – Triberg"). Legs outside it aren't covered — a tight
+    // transfer there is unprotected. Checked for the cheapest fresh results only.
+    if (pricing && !abort()) {
+      const fresh = [...collected.values()]
+        .filter((r) => r.coverage.price != null && r.refreshToken && r.coverage.uncoveredLegs === undefined)
+        .sort((a, b) => a.coverage.price! - b.coverage.price!)
+        .slice(0, params.daySlot ? 4 : 8);
+      for (const r of fresh) {
+        if (dailyRemaining() <= 0 || abort()) break;
+        onDbUse();
+        try {
+          await jitter();
+          const offer = await pricing.refreshJourney(r.refreshToken!, {
+            tickets: true,
+            stopovers: false,
+            bahncard: prefs.bahncard,
+            klasse: prefs.klasse,
+            deutschlandTicket: prefs.deutschlandTicket,
+          });
+          const span = offer.ticketInfo;
+          const stored = loadJourney(r.fingerprint);
+          if (!span?.fromName || !span.toName || !stored?.price) continue;
+          stored.ticketInfo = { ...span, klasse: prefs.klasse };
+          stored.price.spanChecked = true;
+          // the offer details carry today's price of this very connection too
+          if (typeof offer.price?.amount === "number") stored.price.amount = offer.price.amount;
+          r.coverage = assessCoverage(stored, expected, { deutschlandTicket: prefs.deutschlandTicket });
+          r.priceCheckedAt = now();
+          saveJourneyResult(params.travelDate, pricing.name, stored, r);
+        } catch {
+          /* best effort — the result keeps its price */
+        }
+      }
+      emit({ type: "results", results: snapshot(), meta: meta() });
     }
 
     // ---- Resolve bahn.de station ids for a working "Bei DB prüfen" link ----

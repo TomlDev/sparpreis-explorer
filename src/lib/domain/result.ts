@@ -120,6 +120,8 @@ export interface BuildResultContext {
   /** Requested O→D names — used to verify a priced journey really covers them. */
   expected?: { fromName?: string; toName?: string };
   resultKind?: ResultKind;
+  /** The user holds a Deutschlandticket: regional trains outside a ticket's span are covered. */
+  deutschlandTicket?: boolean;
 }
 
 export function buildResult(
@@ -127,7 +129,7 @@ export function buildResult(
   ctx: BuildResultContext = {},
 ): SearchResult {
   const metrics = analyzeJourney(journey);
-  const coverage = assessCoverage(journey, ctx.expected);
+  const coverage = assessCoverage(journey, ctx.expected, { deutschlandTicket: ctx.deutschlandTicket });
   const segs = fvSegments(journey);
   const headline =
     segs.length > 0

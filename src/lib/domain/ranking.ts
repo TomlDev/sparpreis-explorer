@@ -1,5 +1,6 @@
 import { RANKING } from "@/lib/config";
 import type { SearchResult } from "./result";
+import { effectiveMinTransfer } from "./ticketTransfers";
 
 export type SortMode =
   | "proforma"
@@ -102,7 +103,7 @@ export function compareBy(mode: SortMode): (a: SearchResult, b: SearchResult) =>
     case "tight-transfers":
       // Shortest "shortest transfer" first (purely informational sort).
       return (a, b) =>
-        (a.metrics.minTransferMin ?? 1e9) - (b.metrics.minTransferMin ?? 1e9);
+        (effectiveMinTransfer(a) ?? 1e9) - (effectiveMinTransfer(b) ?? 1e9);
     case "unreliable":
       return (a, b) => flexOrder(a, b) || priceOr(a, 1e9) - priceOr(b, 1e9);
     case "cheap-flex":

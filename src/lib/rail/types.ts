@@ -48,6 +48,8 @@ export interface NormPrice {
   fullRoute?: boolean;
   /** Which search produced this price (to rebuild it on bahn.de). */
   how?: "plain" | "lowfv" | "via" | "proforma";
+  /** ticketInfo holds the span from DB's offer details (not just the trip's endpoints). */
+  spanChecked?: boolean;
   hint?: string | null;
 }
 
@@ -121,7 +123,7 @@ export interface RailProvider {
   ): Promise<NormJourneysResult>;
   refreshJourney(
     refreshToken: string,
-    opts?: { tickets?: boolean; stopovers?: boolean },
+    opts?: { tickets?: boolean; stopovers?: boolean; bahncard?: string | null; klasse?: 1 | 2; deutschlandTicket?: boolean },
   ): Promise<NormJourney>;
   /** Optional: DB "Bestpreis" search — cheapest fares across the day. Only
    *  pricing providers implement this; used for the anchor + calendar. */

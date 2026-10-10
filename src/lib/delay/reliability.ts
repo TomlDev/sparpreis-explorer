@@ -213,6 +213,8 @@ export function computeReliability(
   legs: LegLike[],
   src: StatSource,
   ctx: ReliabilityContext,
+  /** Legs outside the ticket — their delays don't lift its Zugbindung. */
+  uncovered?: readonly number[],
 ): Reliability | null {
   const dow = dowGroup(ctx.travelDate);
   const K = ctx.weights.minSamples;
@@ -244,7 +246,7 @@ export function computeReliability(
     return perDay > 0 ? Math.round(60 / perDay) : null;
   };
 
-  const rail = legs.map((l, i) => ({ l, i })).filter(({ l }) => !l.isWalking && RAIL_PRODUCTS.has(l.product ?? ""));
+  const rail = legs.map((l, i) => ({ l, i })).filter(({ l, i }) => !l.isWalking && RAIL_PRODUCTS.has(l.product ?? "") && !uncovered?.includes(i));
   if (!rail.length) return null;
 
   const legOut: (ReliabilityLeg | null)[] = legs.map(() => null);

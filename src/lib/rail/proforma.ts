@@ -1,5 +1,6 @@
 import { userAgent } from "@/lib/config";
 import { mapBahncard } from "./dbVendo";
+import { withOfferSpan } from "./offerSpan";
 import { dlog } from "@/lib/log";
 import { callImpersonate, makeImpersonatingRequest } from "./impersonate";
 import { mapJourney } from "./hafasMap";
@@ -56,6 +57,7 @@ async function getWebClient(): Promise<WebClient> {
       const { createClient } = await import("db-vendo-client");
       const { profile } = await import("db-vendo-client/p/dbweb/index.js");
       (profile as { request?: unknown }).request = makeImpersonatingRequest();
+      await withOfferSpan(profile);
       // db-vendo's dbweb only sends a global `produktgattungen`. Wrap
       // formatJourneysReq to rewrite the body into the per-Abschnitt shape
       // when ctx.opt.abschnitte is present.

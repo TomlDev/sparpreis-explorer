@@ -102,6 +102,8 @@ export function mapJourney(j: unknown): NormJourney {
     legs?: unknown[];
     refreshToken?: string;
     price?: { amount?: number; currency?: string; hint?: string } | null;
+    /** Where the ticket is valid (offer details, see rail/offerSpan). */
+    ticketSpan?: { fromName: string; toName: string } | null;
   };
   const price =
     o.price && typeof o.price.amount === "number"
@@ -113,13 +115,14 @@ export function mapJourney(j: unknown): NormJourney {
           // connection O→D that was searched, so a returned price is a valid
           // through-ticket. Only these providers use this mapper.
           fullRoute: true,
+          ...(o.ticketSpan ? { spanChecked: true } : {}),
         }
       : null;
   return {
     legs: Array.isArray(o.legs) ? o.legs.map(mapLeg) : [],
     refreshToken: o.refreshToken ?? null,
     price,
-    ticketInfo: null,
+    ticketInfo: o.ticketSpan ? { fromName: o.ticketSpan.fromName, toName: o.ticketSpan.toName } : null,
   };
 }
 

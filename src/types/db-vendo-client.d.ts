@@ -15,3 +15,6 @@ declare module "db-vendo-client/p/dbnav/index.js" {
 declare module "db-vendo-client/p/dbweb/index.js" {
   export const profile: unknown;
 }
+declare module "db-vendo-client/parse/journey.js" {
+  export function parseJourney(ctx: unknown, raw: unknown): unknown;
+}
