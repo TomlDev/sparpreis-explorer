@@ -8,7 +8,7 @@ import { ClaimantCard } from "@/components/ClaimantCard";
 import { DelayDataCard } from "@/components/DelayDataCard";
 import { DbAccountCard } from "@/components/DbAccountCard";
 import { MailSyncCard } from "@/components/MailSyncCard";
-import { Badge, Button, Input, Spinner, Switch } from "@/components/ui";
+import { Button, Input, Spinner, Switch } from "@/components/ui";
 import { SettingsGroup, SettingsSection } from "@/components/SettingsSection";
 
 interface Station {
@@ -63,13 +63,16 @@ export default function SettingsPage() {
     loadFavorites();
   }, [loadProfiles, loadFavorites]);
 
-  async function post(body: unknown) {
-    await fetch("/api/profiles", {
+  async function post(body: unknown): Promise<boolean> {
+    const res = await fetch("/api/profiles", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
-    });
+    }).catch(() => null);
+    const d = await res?.json().catch(() => ({}));
+    if (!res?.ok) alert(d?.error ?? "Speichern fehlgeschlagen");
     await loadProfiles();
+    return !!res?.ok;
   }
 
   async function cacheAction(action: string) {
@@ -128,11 +131,11 @@ export default function SettingsPage() {
             summary={routeSummary}
           >
             {/* Default route */}
-            <div className="flex flex-wrap items-end gap-2">
-              <label className="flex flex-col gap-1">
+            <div className="grid gap-2 sm:flex sm:flex-wrap sm:items-end">
+              <label className="flex min-w-0 flex-col gap-1">
                 <span className="text-xs text-muted-foreground">Standardroute von</span>
                 <select
-                  className="h-10 rounded-xl border border-input bg-background px-3"
+                  className="h-10 w-full min-w-0 rounded-xl border border-input bg-background px-3"
                   value={defaultRoute?.originKey ?? ""}
                   onChange={(e) => setDefaultRoute((d) => ({ originKey: e.target.value, destKey: d?.destKey ?? "" }))}
                 >
@@ -143,10 +146,10 @@ export default function SettingsPage() {
                   ))}
                 </select>
               </label>
-              <label className="flex flex-col gap-1">
+              <label className="flex min-w-0 flex-col gap-1">
                 <span className="text-xs text-muted-foreground">nach</span>
                 <select
-                  className="h-10 rounded-xl border border-input bg-background px-3"
+                  className="h-10 w-full min-w-0 rounded-xl border border-input bg-background px-3"
                   value={defaultRoute?.destKey ?? ""}
                   onChange={(e) => setDefaultRoute((d) => ({ originKey: d?.originKey ?? "", destKey: e.target.value }))}
                 >
@@ -180,14 +183,7 @@ export default function SettingsPage() {
                   <SettingsSection
                     key={p.id}
                     nested
-                    title={
-                      <span className="inline-flex items-center gap-2">
-                        {p.label}
-                        <Badge variant="outline" className="px-2 py-0 font-normal">
-                          {p.key}
-                        </Badge>
-                      </span>
-                    }
+                    title={p.label}
                     state={usable(p) ? "done" : "todo"}
                     summary={
                       active.length
@@ -195,6 +191,7 @@ export default function SettingsPage() {
                         : "Noch keine zugeordnete Haltestelle"
                     }
                   >
+                    <ProfileName label={p.label} onRename={(label) => post({ action: "rename", profileId: p.id, label })} />
                     <div className="space-y-3">
                       {p.stations.map((s, i) => (
                         <StationRow
@@ -215,6 +212,18 @@ export default function SettingsPage() {
                       first={p.stations.length === 0}
                       onAdd={(loc) => post({ action: "addStation", profileId: p.id, stationName: loc.name, query: loc.name, locationId: loc.id })}
                     />
+                    <div className="mt-3 flex justify-end">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="text-danger"
+                        onClick={() => {
+                          if (confirm(`„${p.label}“ mit allen Haltestellen löschen?`)) void post({ action: "delete", profileId: p.id });
+                        }}
+                      >
+                        <Trash2 className="h-4 w-4" /> Ort löschen
+                      </Button>
+                    </div>
                   </SettingsSection>
                 );
               })}
@@ -391,7 +400,8 @@ function StationRow({
 
   return (
     <div className={"rounded-xl border border-border p-3 " + (station.enabled ? "" : "bg-muted/30 opacity-60")}>
-      <div className="flex items-center justify-between gap-2">
+      {/* phone: name + state on top, the controls below; wider screens: one row */}
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex min-w-0 items-center gap-2">
           {/* Reorder (primär ↔ Fallback / Reihenfolge) */}
           <div className="flex flex-col">
@@ -429,7 +439,7 @@ function StationRow({
             </div>
           </div>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex shrink-0 items-center justify-end gap-2">
           <Switch checked={station.enabled} onChange={onToggle} />
           <Button size="sm" variant="outline" onClick={() => setOpen((o) => !o)}>
             {station.resolved ? "Ändern" : "Zuordnen"}
@@ -478,6 +488,33 @@ function NewProfile({ onCreate }: { onCreate: (label: string) => void }) {
           <Plus className="h-4 w-4" />
         </Button>
       </div>
+    </div>
+  );
+}
+
+/** The place's name, editable in place (the internal key stays — links and cached searches use it). */
+function ProfileName({ label, onRename }: { label: string; onRename: (label: string) => Promise<boolean> }) {
+  const [v, setV] = React.useState(label);
+  const [saved, setSaved] = React.useState(false);
+  React.useEffect(() => setV(label), [label]);
+  const changed = v.trim() !== label && v.trim().length > 0;
+  return (
+    <div className="mb-3 flex gap-2">
+      <Input aria-label="Name" value={v} onChange={(e) => setV(e.target.value)} placeholder="Name, z. B. Freiburg" />
+      <Button
+        size="sm"
+        variant="outline"
+        className="h-10 shrink-0"
+        disabled={!changed}
+        onClick={async () => {
+          if (await onRename(v.trim())) {
+            setSaved(true);
+            setTimeout(() => setSaved(false), 1500);
+          }
+        }}
+      >
+        {saved ? "✓" : "Umbenennen"}
+      </Button>
     </div>
   );
 }

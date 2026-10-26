@@ -4,9 +4,11 @@ import { getSetting } from "@/lib/repo/settings";
 import {
   addStation,
   createProfile,
+  deleteProfile,
   listProfiles,
   moveStation,
   removeStation,
+  renameProfile,
   resolveStation,
   setDefaultRoute,
   setStationEnabled,
@@ -63,6 +65,15 @@ export async function POST(req: Request) {
       break;
     case "setDefault":
       setDefaultRoute(String(body.originKey), String(body.destKey));
+      break;
+    case "rename":
+    case "delete":
+      try {
+        if (action === "rename") renameProfile(String(body.profileId), String(body.label ?? ""));
+        else deleteProfile(String(body.profileId));
+      } catch (e) {
+        return NextResponse.json({ error: (e as Error).message }, { status: 400 });
+      }
       break;
     default:
       return NextResponse.json({ error: "unknown action" }, { status: 400 });

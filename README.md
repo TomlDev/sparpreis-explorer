@@ -194,9 +194,9 @@ Gebucht ist ein günstiges Ticket mit hoher Flex-Chance, jetzt zählt der Tag se
 ## So benutzt du sie
 
 1. **Einrichten:** Unter **Einstellungen** BahnCard und Klasse wählen, unter **Start & Ziele**
-   deine Orte anlegen und ihre Haltestellen direkt aus der Haltestellensuche wählen (pro Ort
-   mehrere, z. B. ein Hauptbahnhof als Ausweich-Start) und unter **Pünktlichkeit** die Daten
-   laden. Fertig eingerichtete
+   deine Orte anlegen (umbenennen und löschen geht auch) und ihre Haltestellen direkt aus der
+   Haltestellensuche wählen (pro Ort mehrere, z. B. ein Hauptbahnhof als Ausweich-Start) und
+   unter **Pünktlichkeit** die Daten laden. Fertig eingerichtete
    Bereiche klappen sich zu, offene Punkte sind markiert.
 2. **Flex-Tag suchen:** „Ganzer Tag“ einschalten, Datum und Grenzen (Min. Flex, Max.
    Anschluss, Max. Preis) wählen, warten, das günstigste Ticket mit niedriger

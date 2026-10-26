@@ -137,6 +137,33 @@ export function createProfile(key: string, label: string): RouteProfile {
   return { id, key, label, stations: [] };
 }
 
+/** New display name — the key stays (cached searches, links and the last view use it). */
+export function renameProfile(id: string, label: string): void {
+  const l = label.trim().slice(0, 60);
+  if (!l) throw new Error("Name fehlt");
+  db.update(routeProfiles).set({ label: l }).where(eq(routeProfiles.id, id)).run();
+}
+
+/**
+ * Remove a start / destination with its stations. At least two must stay (the
+ * search needs both ends); a default route using it moves to the remaining ones.
+ */
+export function deleteProfile(id: string): void {
+  const all = listProfiles();
+  const p = all.find((x) => x.id === id);
+  if (!p) return;
+  if (all.length <= 2) throw new Error("Mindestens zwei Orte nötig (Start und Ziel)");
+  db.delete(profileStations).where(eq(profileStations.profileId, id)).run();
+  db.delete(routeProfiles).where(eq(routeProfiles.id, id)).run();
+  const dr = getSetting<DefaultRoute>("defaultRoute");
+  if (dr && (dr.originKey === p.key || dr.destKey === p.key)) {
+    const rest = all.filter((x) => x.id !== id);
+    const origin = dr.originKey === p.key ? rest.find((x) => x.key !== dr.destKey) ?? rest[0] : getProfile(dr.originKey)!;
+    const dest = dr.destKey === p.key ? rest.find((x) => x.key !== origin.key) ?? rest[1] : getProfile(dr.destKey)!;
+    setDefaultRoute(origin.key, dest.key);
+  }
+}
+
 export function addStation(
   profileId: string,
   stationName: string,
