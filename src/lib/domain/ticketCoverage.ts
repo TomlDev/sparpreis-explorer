@@ -57,7 +57,7 @@ export function normStationName(name: string): string {
     .trim();
 }
 
-function sameStation(a?: string | null, b?: string | null): boolean {
+export function sameStation(a?: string | null, b?: string | null): boolean {
   if (!a || !b) return false;
   const na = normStationName(a);
   const nb = normStationName(b);

@@ -13,13 +13,18 @@ export interface OfferSpan {
 
 type Raw = Record<string, unknown>;
 
-/** Span of the offer that matches the shown price (else the first one with a span). */
-export function offerSpanOf(raw: unknown): OfferSpan | null {
+/**
+ * Span of the offer that matches the shown price (else the first one with a span).
+ * "full": DB says the offer is no Teilpreis (`teilpreis: false`) — it covers the
+ * whole journey, so there is no "Gilt nur für …" to show.
+ */
+export function offerSpanOf(raw: unknown): OfferSpan | "full" | null {
   const v = raw as Raw | null;
   if (!v || typeof v !== "object") return null;
   const shown = (v.angebotsPreis as { betrag?: number } | undefined)?.betrag;
-  const spans: { price?: number; span: OfferSpan }[] = [];
+  const spans: { price?: number; span: OfferSpan | "full" }[] = [];
   for (const ra of (v.reiseAngebote as Raw[] | undefined) ?? []) {
+    if (ra.teilpreis === false) spans.push({ price: (ra.preis as { betrag?: number } | undefined)?.betrag, span: "full" });
     for (const fa of ((ra.hinfahrt as Raw | undefined)?.fahrtAngebote as Raw[] | undefined) ?? []) {
       const h = ((fa.teilpreisDetails as Raw | undefined)?.intervallPreis as Raw | undefined)?.haltIntervall as
         | { abfahrtHalt?: { name?: string }; ankunftHalt?: { name?: string } }
@@ -30,7 +35,9 @@ export function offerSpanOf(raw: unknown): OfferSpan | null {
     }
   }
   if (!spans.length) return null;
-  return (spans.find((s) => shown != null && s.price === shown) ?? spans[0]).span;
+  const match = spans.find((s) => shown != null && s.price === shown);
+  // without a matching price: a real span says more than "full"
+  return (match ?? spans.find((s) => s.span !== "full") ?? spans[0]).span;
 }
 
 /** Make a db-vendo profile attach `ticketSpan` to every parsed journey. Call before createClient. */
@@ -39,7 +46,13 @@ export async function withOfferSpan(profile: unknown): Promise<void> {
   (profile as { parseJourney: unknown }).parseJourney = (ctx: unknown, raw: unknown) => {
     const j = parseJourney(ctx, raw) as Record<string, unknown>;
     const span = offerSpanOf(raw);
-    if (span) j.ticketSpan = span;
+    if (span === "full") {
+      // the whole journey: from its first to its last stop
+      const legs = (j.legs as { origin?: { name?: string }; destination?: { name?: string } }[] | undefined) ?? [];
+      const from = legs[0]?.origin?.name;
+      const to = legs[legs.length - 1]?.destination?.name;
+      if (from && to) j.ticketSpan = { fromName: from, toName: to };
+    } else if (span) j.ticketSpan = span;
     return j;
   };
 }

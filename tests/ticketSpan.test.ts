@@ -47,6 +47,15 @@ describe("Wofür gilt das Ticket?", () => {
     };
     expect(offerSpanOf(raw)).toEqual({ fromName: "Essen-Steele", toName: "Marktplatz, Triberg im Schwarzwald" });
     expect(offerSpanOf({ angebotsPreis: { betrag: 10 } })).toBeNull();
+    // no Teilpreis: DB says the shown offer covers the whole journey
+    const full = {
+      angebotsPreis: { betrag: 17.29 },
+      reiseAngebote: [
+        { teilpreis: false, preis: { betrag: 17.29 }, hinfahrt: { fahrtAngebote: [{ preis: { betrag: 17.29 } }] } },
+        { teilpreis: false, preis: { betrag: 30.04 }, hinfahrt: { fahrtAngebote: [{ preis: { betrag: 30.04 } }] } },
+      ],
+    };
+    expect(offerSpanOf(full)).toBe("full");
   });
 
   it("Straßenbahn/Bus außerhalb: gültiges Ticket mit Hinweis, Abschnitte markiert", () => {

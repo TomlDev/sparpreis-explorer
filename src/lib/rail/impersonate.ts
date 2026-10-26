@@ -125,7 +125,25 @@ export function queryString(query: Record<string, unknown> | null | undefined): 
   return parts.join("&");
 }
 
-export function makeImpersonatingRequest(impersonate = process.env.DB_IMPERSONATE_TARGET || "chrome") {
+/**
+ * Browser fingerprints we present, in order of preference. DB's bot protection
+ * now and then starts refusing one with HTTP 403 (Oct 2026: Chrome — Safari and
+ * Firefox went through): then the next one is used and kept.
+ */
+const TARGETS = [...new Set([process.env.DB_IMPERSONATE_TARGET, "safari260", "firefox147", "chrome"].filter((t): t is string => !!t))];
+const g = globalThis as { __impTarget?: number };
+export const impersonateTarget = () => TARGETS[g.__impTarget ?? 0];
+function nextTarget(failed: string): boolean {
+  const i = TARGETS.indexOf(failed);
+  if (i < 0 || i + 1 >= TARGETS.length) return false;
+  if (impersonateTarget() === failed) {
+    g.__impTarget = i + 1;
+    console.error(`[db] fingerprint ${failed} refused (403) – switching to ${TARGETS[i + 1]}`);
+  }
+  return true;
+}
+
+export function makeImpersonatingRequest(fixed?: string) {
   return async function request(ctx: Ctx, userAgent: string, reqData: ReqData) {
     const { profile, opt } = ctx;
     const endpoint = reqData.endpoint;
@@ -148,13 +166,13 @@ export function makeImpersonatingRequest(impersonate = process.env.DB_IMPERSONAT
     const qs = queryString(reqOptions.query);
     if (qs) url += (url.includes("?") ? "&" : "?") + qs;
 
-    const res = await callImpersonate({
-      method: reqOptions.method,
-      url,
-      headers: reqOptions.headers,
-      body: reqOptions.body ?? null,
-      impersonate,
-    });
+    let impersonate = fixed ?? impersonateTarget();
+    let res = await callImpersonate({ method: reqOptions.method, url, headers: reqOptions.headers, body: reqOptions.body ?? null, impersonate });
+    // refused fingerprint → once more with the next one (each at most once per request)
+    while (!fixed && res.status === 403 && nextTarget(impersonate)) {
+      impersonate = impersonateTarget();
+      res = await callImpersonate({ method: reqOptions.method, url, headers: reqOptions.headers, body: reqOptions.body ?? null, impersonate });
+    }
 
     if (res.status === 0) {
       throw new Error(`impersonate transport error: ${res.error || "unknown"}`);
@@ -165,6 +183,8 @@ export function makeImpersonatingRequest(impersonate = process.env.DB_IMPERSONAT
       err.statusCode = res.status;
       throw err;
     }
+    // Debugging: DEBUG_DB_DUMP=<file> appends every raw DB response there.
+    if (process.env.DEBUG_DB_DUMP) (await import("node:fs")).appendFileSync(process.env.DEBUG_DB_DUMP, `${url}\n${res.body}\n\n`);
     const body = JSON.parse(res.body || "{}");
     // Mirror db-vendo-client's error surface (fehlerNachricht / errors).
     if (body && (body.fehlerNachricht || body.errors)) {

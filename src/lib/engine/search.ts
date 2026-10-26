@@ -336,6 +336,10 @@ export async function runSearch(params: SearchParams, opts: RunOptions): Promise
     };
   };
 
+  /** What gets stored for the next visit: everything found for the day — not just what passes
+   *  the current filters (a reload / another filter must find it again; filtering is the view's job). */
+  const keepAll = (): SearchResult[] => [...collected.values()].filter((r) => onTravelDay(r));
+
   const snapshot = (): SearchResult[] => {
     // Annotate each result relative to the current anchor (best "normal" price).
     for (const r of collected.values()) {
@@ -420,7 +424,9 @@ export async function runSearch(params: SearchParams, opts: RunOptions): Promise
   }
   if (params.restoreOnly) {
     dlog("search", "restoreOnly", { seeded: collected.size });
-    emit({ type: "done", results: snapshot(), meta: { ...meta(), cachedAt: seedCachedAt } });
+    const restored = snapshot();
+    finishRun(runId, 0, 0, restored);
+    emit({ type: "done", results: restored, meta: { ...meta(), cachedAt: seedCachedAt } });
     return;
   }
 
@@ -822,7 +828,7 @@ export async function runSearch(params: SearchParams, opts: RunOptions): Promise
       emit({ type: "results", results: snapshot(), meta: meta() });
       await priceNow();
       const finalResults = snapshot();
-      persistQuery(cacheKey, params, finalResults);
+      persistQuery(cacheKey, params, keepAll());
       finishRun(runId, motisUsed + dbUsed, candidatesChecked, finalResults);
       dlog("search", "morePrices done", { results: finalResults.length, dbUsed, pricedVias });
       emit({ type: "done", results: finalResults, meta: meta() });
@@ -1022,7 +1028,7 @@ export async function runSearch(params: SearchParams, opts: RunOptions): Promise
 
     // ---- 7) Finalize ----
     const finalResults = snapshot();
-    persistQuery(cacheKey, params, finalResults);
+    persistQuery(cacheKey, params, keepAll());
     finishRun(runId, motisUsed + dbUsed, candidatesChecked, finalResults);
     dlog("search", "done", {
       results: finalResults.length,

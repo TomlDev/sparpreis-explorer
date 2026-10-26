@@ -39,6 +39,10 @@ export interface NormLeg {
   isWalking: boolean;
   stopovers?: NormStopover[];
   direction?: string | null;
+  /** Realtime: the train doesn't run (or not on this part). */
+  cancelled?: boolean;
+  /** DB trip id of the train (its whole run can be looked up with it). */
+  tripId?: string;
 }
 
 export interface NormPrice {

@@ -2,7 +2,7 @@ import { userAgent } from "@/lib/config";
 import { mapBahncard } from "./dbVendo";
 import { withOfferSpan } from "./offerSpan";
 import { dlog } from "@/lib/log";
-import { callImpersonate, makeImpersonatingRequest } from "./impersonate";
+import { callImpersonate, makeImpersonatingRequest, impersonateTarget } from "./impersonate";
 import { mapJourney } from "./hafasMap";
 import { getLimiter, normalizeError } from "./rateLimiter";
 import type { NormJourney } from "./types";
@@ -110,7 +110,7 @@ export async function resolveRichId(name: string): Promise<string | null> {
       url,
       headers: { Accept: "application/json", "Accept-Language": "de" },
       body: null,
-      impersonate: process.env.DB_IMPERSONATE_TARGET || "chrome",
+      impersonate: impersonateTarget(),
     });
     const arr = JSON.parse(r.body || "[]") as Array<{ id?: string }>;
     const id = arr[0]?.id ?? null;

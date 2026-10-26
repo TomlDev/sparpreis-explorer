@@ -78,6 +78,8 @@ export function mapLeg(leg: unknown): NormLeg {
     walking?: boolean;
     direction?: string;
     stopovers?: unknown[];
+    cancelled?: boolean;
+    tripId?: string;
   };
   const walking = !!o.walking || !o.line;
   return {
@@ -94,6 +96,8 @@ export function mapLeg(leg: unknown): NormLeg {
     isWalking: walking,
     direction: o.direction ?? null,
     stopovers: Array.isArray(o.stopovers) ? o.stopovers.map(mapStopover) : undefined,
+    ...(o.cancelled === true ? { cancelled: true } : {}),
+    ...(o.tripId ? { tripId: o.tripId } : {}),
   };
 }
 
