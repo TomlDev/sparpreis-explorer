@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { useSearchParams } from "next/navigation";
-import { ArrowDownUp, SlidersHorizontal, Search, StopCircle, GitCompare, CircleDollarSign, Pencil, CalendarRange, Trash2, Link2, Check, Layers, List } from "lucide-react";
+import { ArrowDownUp, SlidersHorizontal, Search, StopCircle, GitCompare, CircleDollarSign, Pencil, CalendarRange, Trash2, Layers, List } from "lucide-react";
 import { Sheet } from "@/components/Sheet";
 import { AppHeader } from "@/components/AppHeader";
 import { CalendarStrip } from "@/components/CalendarStrip";
@@ -53,6 +53,9 @@ function Home() {
   // sync with the state below.
   const [initialView] = React.useState(() => parseView(urlParams.toString()));
   const urlHasView = !!initialView.date;
+  /** The last view (localStorage) when the URL brought none; its date if still to come. */
+  const lastView = React.useRef<ReturnType<typeof parseView> | null>(null);
+  const restoreDate = React.useRef<string | null>(null);
 
   const [profiles, setProfiles] = React.useState<Endpoint[]>([]);
   const [origin, setOrigin] = React.useState<Endpoint | null>(null);
@@ -101,7 +104,6 @@ function Home() {
   const [shown, setShown] = React.useState<{ origin: string | null; dest: string | null; date: string } | null>(
     urlHasView ? { origin: initialView.origin, dest: initialView.dest, date: initialView.date! } : null,
   );
-  const [linkCopied, setLinkCopied] = React.useState(false);
   // Every search/restore goes through here, so the link knows which results
   // are on screen.
   const run = React.useCallback(
@@ -126,18 +128,37 @@ function Home() {
         }));
         setProfiles(eps);
         const dr = data.defaultRoute;
-        // A link's route wins over the default route.
+        // A link's route wins over the last view, that over the default route.
         const byKey = (k: string | null | undefined) => (k ? eps.find((e) => e.key === k) : undefined);
-        setOrigin(byKey(initialView.origin) ?? byKey(dr?.originKey) ?? eps[0] ?? null);
-        setDest(byKey(initialView.dest) ?? byKey(dr?.destKey) ?? eps[1] ?? null);
+        const last = lastView.current;
+        setOrigin(byKey(initialView.origin) ?? byKey(last?.origin) ?? byKey(dr?.originKey) ?? eps[0] ?? null);
+        setDest(byKey(initialView.dest) ?? byKey(last?.dest) ?? byKey(dr?.destKey) ?? eps[1] ?? null);
       })
       .catch(() => {});
     // restore teaser
     try {
       const raw = localStorage.getItem("lastResults");
       if (raw) setTeaser(JSON.parse(raw));
-      // The last search pre-fills the form — unless a link brought its own view.
-      const lb = urlHasView ? null : localStorage.getItem("lastBody");
+      // Opened without a view in the URL (logo, typed address): back to the last one —
+      // form, filters, sorting, day scan … (open cards / reference / dialogs not).
+      const lv = urlHasView ? null : localStorage.getItem("lastView");
+      if (lv) {
+        const v = parseView(lv);
+        lastView.current = v;
+        const date = v.date && v.date >= todayLocal() ? v.date : todayLocal();
+        if (v.date && v.date >= todayLocal()) restoreDate.current = v.date; // its results come back from the cache
+        setTravelDate(date);
+        setTimeWindow(v.timeFrom);
+        setTimeTo(v.timeTo);
+        setTimeMode(v.timeMode);
+        setMode(v.mode);
+        setSort(v.sort);
+        setFilters(v.filters);
+        setDayScan(v.day);
+        setGrouped(v.grouped ?? v.day);
+      }
+      // older fallback: the last search pre-fills the form
+      const lb = urlHasView || lv ? null : localStorage.getItem("lastBody");
       if (lb) {
         const b = JSON.parse(lb);
         if (b.timeWindow) setTimeWindow(windowToHHmm(b.timeWindow));
@@ -151,11 +172,11 @@ function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // On mount with a date in the URL, restore cached results once (no live search).
+  // On mount with a date in the URL (or the last view), restore cached results once (no live search).
   const restoredRef = React.useRef(false);
   React.useEffect(() => {
     if (restoredRef.current) return;
-    const urlDate = initialView.date;
+    const urlDate = initialView.date ?? restoreDate.current;
     if (!urlDate) return;
     if (!origin || !dest) return;
     restoredRef.current = true;
@@ -389,9 +410,13 @@ function Home() {
   });
   React.useEffect(() => {
     if (!origin || !dest) return; // profiles not loaded yet — don't drop a link's route
+    try {
+      localStorage.setItem("lastView", viewQuery);
+    } catch {}
     if (window.location.search.replace(/^\?/, "") === viewQuery) return;
     window.history.replaceState(null, "", `${window.location.pathname}?${viewQuery}`);
-  }, [shown, viewQuery]);
+    // also when only the address changed (logo → bare "/" while on this page)
+  }, [shown, viewQuery, urlParams]);
 
   // Opened via a link with expanded cards → scroll the first one into view once.
   const scrolledRef = React.useRef(false);
@@ -412,28 +437,6 @@ function Home() {
       else next.delete(fp);
       return next;
     });
-  }
-
-  function copyLink() {
-    const url = window.location.href;
-    const done = () => {
-      setLinkCopied(true);
-      setTimeout(() => setLinkCopied(false), 1500);
-    };
-    if (navigator.clipboard?.writeText) {
-      navigator.clipboard.writeText(url).then(done).catch(done);
-    } else {
-      // fallback for non-secure contexts
-      const ta = document.createElement("textarea");
-      ta.value = url;
-      document.body.appendChild(ta);
-      ta.select();
-      try {
-        document.execCommand("copy");
-      } catch {}
-      ta.remove();
-      done();
-    }
   }
 
   function toggleCompare(fp: string) {
@@ -470,31 +473,10 @@ function Home() {
         </span>
         <Pencil className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
       </button>
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon"
-        onClick={copyLink}
-        aria-label="Link zu dieser Ansicht kopieren"
-        title={linkCopied ? "Link kopiert" : "Link zu dieser Ansicht kopieren"}
-      >
-        {linkCopied ? <Check className="h-5 w-5 text-success" /> : <Link2 className="h-5 w-5" />}
-      </Button>
-      <Button type="button" variant="ghost" size="icon" onClick={() => setCalendarOpen(true)} aria-label="Woche vergleichen" title="Woche vergleichen">
-        <CalendarRange className="h-5 w-5" />
-      </Button>
-      <Button type="button" variant="ghost" size="icon" onClick={() => setFiltersOpen(true)} aria-label="Filter">
+      {/* phone only — on the desktop the filters sit in the left column */}
+      <Button type="button" variant="ghost" size="icon" className="lg:hidden" onClick={() => setFiltersOpen(true)} aria-label="Filter">
         <SlidersHorizontal className="h-5 w-5" />
       </Button>
-      {state.running ? (
-        <Button type="button" variant="ghost" size="icon" onClick={abort} aria-label="Abbrechen">
-          <StopCircle className="h-5 w-5" />
-        </Button>
-      ) : (
-        <Button type="button" size="icon" onClick={() => submit()} aria-label="Suchen">
-          <Search className="h-5 w-5" />
-        </Button>
-      )}
     </div>
   );
 
@@ -646,6 +628,7 @@ function Home() {
               </Button>
               <Button type="button" variant="outline" size="lg" onClick={() => setCalendarOpen(true)} title="Woche vergleichen">
                 <CalendarRange className="h-5 w-5" />
+                <span className="hidden sm:inline">Woche</span>
               </Button>
             </div>
           </form>
@@ -700,7 +683,10 @@ function Home() {
         {state.running && (
           <div className="mt-3 rounded-xl border border-border bg-card p-3">
             <div className="flex items-center gap-2 text-sm">
-              <Spinner /> {state.status ?? "Suche läuft …"}
+              <Spinner /> <span className="min-w-0 flex-1">{state.status ?? "Suche läuft …"}</span>
+              <Button type="button" size="sm" variant="outline" onClick={abort} title="Suche abbrechen – bisherige Treffer bleiben">
+                <StopCircle className="h-4 w-4" /> Stoppen
+              </Button>
             </div>
             {state.progress && state.progress.total > 0 && (
               <div className="mt-2">
@@ -731,10 +717,13 @@ function Home() {
           </Card>
         )}
 
-        {/* Mobile sort row (desktop uses the floating right stack) */}
+        {/* Mobile sort row (desktop: the left column) */}
         {displayResults.length > 0 && (
           <div className="mt-3 flex gap-2 overflow-x-auto pb-1 lg:hidden">
             <span className="shrink-0">{groupToggle}</span>
+            <Chip type="button" onClick={() => setCalendarOpen(true)} className="inline-flex shrink-0 items-center gap-1">
+              <CalendarRange className="h-3.5 w-3.5" /> Woche
+            </Chip>
             {(Object.keys(SORT_LABELS) as SortMode[]).map((s) => (
               <Chip key={s} type="button" active={sort === s} onClick={() => setSort(s)} className="shrink-0">
                 {SORT_LABELS[s]}
@@ -899,6 +888,9 @@ function Home() {
               />
               <Button size="sm" variant="outline" className="mt-2" onClick={() => setFiltersOpen(true)}>
                 Alle Filter …
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setCalendarOpen(true)} title="Bestpreise der Woche um das Datum">
+                <CalendarRange className="h-4 w-4" /> Woche vergleichen
               </Button>
             </div>
           )}

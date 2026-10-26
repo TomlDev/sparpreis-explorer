@@ -108,17 +108,22 @@ liegt, zeigt die App passende Tickets aus diesen Suchen gleich mit, ohne neue Ab
 
 Gebucht ist ein günstiges Ticket mit hoher Flex-Chance, jetzt zählt der Tag selbst:
 
-- **Früh hinschauen:** Für Fahrten, die nicht auf „Nehme ich“ stehen, fragt die App ab 3 h
-  vor Abfahrt alle 15 min den Live-Stand *aller* Züge der Verbindung ab (nach der ersten
-  Suche eine Anfrage pro Zug). Jeder Zug wird außerdem ab 1 h vor seiner Abfahrt am
-  *Startbahnhof* verfolgt, nicht erst kurz vor deinem Einstieg.
+- **Sparsam hinschauen:** Ab 30 min vor dem ersten Zug fragt die App Zug für Zug: den
+  aktuellen bzw. nächsten Zug alle 10 min und genau zu Abfahrt/Ankunft, spätere Züge (nur
+  bei Fahrten ohne „Nehme ich“) alle 30 min. Fehlgeschlagene Abfragen warten 10 min, lehnt
+  die DB einen Browser-Fingerabdruck ab, wechselt die App automatisch. (Die Abfrage einer
+  ganzen gebuchten Verbindung liefert bei der DB nur Planzeiten – deshalb pro Zug.)
 - **Prognose:** Verspätung am Ticketziel, platzende Anschlüsse, Ausfälle – oben in der
-  Heute-Leiste und auf der Fahrt-Seite.
-- **Platzt ein Anschluss, entscheidet der schnellste Ersatz:** Die Zugbindung entfällt nur,
-  wenn du am Ziel ≥ 20 min später bist. Deshalb sucht die App im DB-Live-Fahrplan die
-  schnellste Weiterfahrt ab dem Bruchpunkt und prüft sie alle 10 min neu: „Anschluss in
-  Mannheim platzt – Ersatz kommt +12 min an, Zugbindung bleibt“ oder eben „aufgehoben“.
-  Jedes Ergebnis landet mit Uhrzeit als **Beleg** an der Fahrt.
+  Heute-Leiste (beim Scrollen auf eine Zeile verkleinert) und auf der Fahrt-Seite.
+- **Das Urteil der DB zählt:** Mit verbundenem DB-Konto liest die App während der Fahrt alle
+  10 min die *Reisebegleitung* deiner Buchung – dieselben Angaben wie im DB Navigator:
+  Zugbindung **aufgehoben/besteht**, Verbindung **fahrbar/nicht mehr fahrbar**, Alternative
+  **möglich/nötig**. Dafür bleibt währenddessen ein bahn.de-Tab auf dem Server offen (kein
+  ständiges Neu-Anmelden). Jede Änderung landet mit Uhrzeit als **Beleg** an der Fahrt.
+- **Ohne DB-Konto schätzt die App selbst:** Unter 2 min zum Umsteigen gilt ein Anschluss als
+  nicht erreichbar, ≥ 20 min am Ziel heben die Zugbindung auf. Zusätzlich sucht sie im
+  DB-Live-Fahrplan die schnellste Weiterfahrt ab dem Bruchpunkt – sie sagt, wie spät du damit
+  ankommst.
 - **Ersatzverbindung wählen:** Ist die Zugbindung weg, zeigt die Fahrt-Seite die nächsten
   Verbindungen ab dem Start (unterwegs ab dem Bruchpunkt) mit Echtzeit, Anschluss-Quote und
   Flex-Chance. Ein Tipp auf **„Nehme ich“** trägt sie als verknüpfte Ersatzfahrt ein; die
@@ -138,11 +143,16 @@ Gebucht ist ein günstiges Ticket mit hoher Flex-Chance, jetzt zählt der Tag se
 - **Kalender:** zeigt den günstigsten Preis pro Tag.
 - **Gutscheine griffbereit:** Oben rechts in der Suche stehen deine offenen DB-Gutscheine;
   ein Tipp zeigt die Nummern mit Kopier-Knopf zum Einlösen auf bahn.de.
+- **Welcher Gutschein ist weg?** Die Buchungsmails sagen nur „per Gutschein“. Bleibt ein Rest,
+  schickt die DB dafür einen neuen Gutschein mit der Auftragsnummer – die App rechnet
+  alter Wert = Preis + Rest, hakt den passenden alten Gutschein ab und fragt nach, wenn
+  mehrere gleich hohe in Frage kommen.
 - **Filter und Sortierung:** Preis, Dauer, Umstiege, ICE-Anteil, Fernverkehrs-Abschnitte,
   Flex-Chance, Anschluss-Quote, Ankunfts- statt Abfahrtszeit und mehr.
 - **Alles in der URL:** Suche, Filter, Sortierung, Gruppierung und aufgeklappte Verbindungen
   stehen jederzeit in der Adresse – Neuladen oder ein geteilter Link zeigt genau das, was du
-  siehst (die Ergebnisse kommen dabei aus dem Cache, ohne neue Abfragen).
+  siehst (die Ergebnisse kommen dabei aus dem Cache, ohne neue Abfragen). Wer die Startseite
+  ohne Parameter öffnet (Logo, eingetippte Adresse), landet wieder bei seinem letzten Stand.
 - **Wird mit der Zeit besser:** Die App merkt sich Strecken, Umstiegsbahnhöfe und Preise
   deiner Suchen und findet auf der Stammstrecke schneller Treffer.
 
@@ -155,10 +165,17 @@ Gebucht ist ein günstiges Ticket mit hoher Flex-Chance, jetzt zählt der Tag se
   und genau zur Abfahrt und Ankunft) und ergänzt später die offiziellen Ist-Zeiten aus den
   Open Data. Selbst gemessene Werte bleiben immer erhalten, auch wenn die DB ihre Daten
   nachträglich ändert.
-- **Doppelt gebucht?** Zwei Fahrten am selben Tag in dieselbe Richtung werden erkannt; mit
-  „✓ Nehme ich“ / „✗ Nehme ich nicht“ markierst du, welche du fährst. Die andere ist
-  ausgegraut und taucht nicht als nächste Fahrt auf – außer ihre Zugbindung fällt weg, dann
-  ist ihr Ticket wieder frei.
+- **Doppelt gebucht?** Überschneiden sich zwei Fahrten zeitlich, steht „Doppelt gebucht“
+  daran; bis du entscheidest, sind beide normale Fahrten. „✓ Nehme ich“ macht die andere zur
+  ausgegrauten Reserve, „✗ Nehme ich nicht“ geht auch für beide.
+- **Was deckt das Ticket ab?** Aus dem Geltungsbereich der Buchung („Bochum+City →
+  Freiburg“) markiert die Fahrt-Seite jeden Abschnitt: im Ticket, per **City-Ticket**
+  abgedeckt (z. B. die Straßenbahn zum Bahnhof) oder **nicht im Ticket** – dann braucht es
+  einen eigenen Fahrschein.
+- **Zugbindung aufgehoben, Ticket offen:** Nicht gefahren, weil ≥ 20 min Verspätung
+  angekündigt waren (Screenshot hochladen)? Dann bleibt das Ticket als „offen“ stehen – laut
+  DB bis zu ein Jahr nutzbar. Später entscheidest du: damit gefahren (wird als Ersatzfahrt
+  verknüpft) oder Erstattung (nur ab 60 min).
 - **Mit dem Ticket später gefahren:** Ab 20 min angekündigter Verspätung darfst du laut DB
   auch an einem anderen Tag fahren (bis zu einem Jahr später). Die gebuchte Fahrt wird dann
   mit der tatsächlich gemachten verknüpft; Entschädigung gibt es pro Ticket nur einmal, für

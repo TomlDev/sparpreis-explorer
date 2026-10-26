@@ -205,6 +205,8 @@ export function ResultCard({
         price: r.coverage.price,
         klasse: r.coverage.klasse === 1 ? 1 : 2,
         ticketType: r.coverage.price != null ? "Sparpreis" : null,
+        // the span DB named for this price ("Gilt nur für …") — the trip page marks what's outside
+        ticket: r.coverage.spanChecked && r.coverage.offerFromName && r.coverage.offerToName ? { from: r.coverage.offerFromName, to: r.coverage.offerToName } : null,
         legs: r.legs.map((l) => ({
           product: l.product,
           lineName: l.lineName,
@@ -292,28 +294,6 @@ export function ResultCard({
                 )}
               </>
             )}
-            <div className="mt-1.5">
-              <ChainPills legs={r.legs} />
-            </div>
-            {r.headlineFv && (
-              <div className="mt-0.5 truncate text-xs text-muted-foreground">
-                <span className="font-medium text-primary">FV</span> {r.headlineFv.lineName} ·{" "}
-                {r.headlineFv.fromName} → {r.headlineFv.toName} · {m.fvMinutes} min ·{" "}
-                {m.fvStops} {m.fvStops === 1 ? "Halt" : "Halte"}
-                {m.fvPercent > 0 ? ` · ${m.fvPercent.toLocaleString("de-DE")} %` : ""}
-                {m.fvLegs > 0 ? ` · ${m.fvLegs}× FV` : ""}
-              </div>
-            )}
-            <div className="mt-1.5 flex flex-wrap items-center gap-1.5 empty:hidden">
-              {/* green through-ticket check moves next to the price; only show a
-                  badge here when coverage is NOT a clean through-ticket. */}
-              {r.coverage.coverage !== "green" && (
-                <CoverageBadge coverage={r.coverage.coverage} reason={r.coverage.reason} />
-              )}
-              {r.resultKind === "proforma" && <Badge variant="muted">Pro-Forma</Badge>}
-              {r.variantLabel && <Badge variant="outline">ab {r.variantLabel}</Badge>}
-              <ReliabilityBadges rel={r.reliability} />
-            </div>
           </div>
 
           {/* right: price */}
@@ -344,16 +324,47 @@ export function ResultCard({
                 <span className="text-[11px] font-medium text-success">−{formatEuro(r.savingsVsAnchor)}</span>
               )
             )}
-            {stars > 0 && <Stars n={stars} />}
           </div>
           <ChevronDown
             className={cn("mt-1 h-5 w-5 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")}
           />
         </div>
 
-        {r.reasons.length > 0 && (
-          <div className="mt-1.5 truncate text-xs text-muted-foreground">
-            💡 {r.reasons.slice(0, 2).join(" · ")}
+        {/* full card width: the train chain doesn't wrap next to the price column */}
+        <div className="mt-1.5">
+          <ChainPills legs={r.legs} />
+        </div>
+        {r.headlineFv && (
+          <div className="mt-0.5 truncate text-xs text-muted-foreground">
+            <span className="font-medium text-primary">FV</span> {r.headlineFv.lineName} ·{" "}
+            {r.headlineFv.fromName} → {r.headlineFv.toName} · {m.fvMinutes} min ·{" "}
+            {m.fvStops} {m.fvStops === 1 ? "Halt" : "Halte"}
+            {m.fvPercent > 0 ? ` · ${m.fvPercent.toLocaleString("de-DE")} %` : ""}
+            {m.fvLegs > 0 ? ` · ${m.fvLegs}× FV` : ""}
+          </div>
+        )}
+        <div className="mt-1.5 flex flex-wrap items-center gap-1.5 empty:hidden">
+          {/* green through-ticket check moves next to the price; only show a
+              badge here when coverage is NOT a clean through-ticket. */}
+          {r.coverage.coverage !== "green" && (
+            <CoverageBadge coverage={r.coverage.coverage} reason={r.coverage.reason} />
+          )}
+          {r.resultKind === "proforma" && <Badge variant="muted">Pro-Forma</Badge>}
+          {r.variantLabel && <Badge variant="outline">ab {r.variantLabel}</Badge>}
+          <ReliabilityBadges rel={r.reliability} />
+        </div>
+        {/* hints left, the rating right (above "Vergleichen") — keeps the price column narrow
+            so the train chain gets the width */}
+        {(r.reasons.length > 0 || stars > 0) && (
+          <div className="mt-1.5 flex items-center gap-3">
+            <div className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+              {r.reasons.length > 0 && <>💡 {r.reasons.slice(0, 2).join(" · ")}</>}
+            </div>
+            {stars > 0 && (
+              <span className="shrink-0">
+                <Stars n={stars} />
+              </span>
+            )}
           </div>
         )}
 
