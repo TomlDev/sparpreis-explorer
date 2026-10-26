@@ -566,6 +566,20 @@ export interface LegRealtime {
   dbLater?: { dep?: string | null; arr?: string | null } | null;
 }
 
+/** DB's Reisebegleitung for a booked journey: what the DB Navigator shows. */
+export interface DbTripStatus {
+  /** FAHRBAR | GEBROCHEN | NICHT_REKONSTRUIERBAR | VORLAEUFIG_NICHT_REKONSTRUIERBAR … */
+  status: string | null;
+  /** AUFGEHOBEN | BESTEHT */
+  zugbindung: string | null;
+  /** ALTERNATIVEN_KANN | ALTERNATIVEN_MUSS | ALTERNATIVEN_KEINE */
+  alternativen: string | null;
+  relevanteAbweichung: boolean;
+  /** realtime arrival at the destination as DB has it (ISO-ish local) */
+  rtArrival: string | null;
+  checkedAt: number;
+}
+
 /**
  * A connection of the trip breaks (missed / cancelled): the fastest journey from
  * there to the ticket's destination, from DB's live timetable. Its delay at the
@@ -619,7 +633,7 @@ export const trips = sqliteTable(
     plannedDeparture: text("planned_departure"),
     plannedArrival: text("planned_arrival"),
     legs: text("legs", { mode: "json" }).$type<TripLeg[]>().notNull(),
-    // planned | done | delayed | aborted | not_started | cancelled | moved
+    // planned | done | delayed | aborted | not_started | cancelled | moved | lifted
     status: text("status").notNull().default("planned"),
     // search | pdf | email | db | manual | copy (replacement journey, see movedFrom)
     source: text("source").notNull().default("manual"),
@@ -646,8 +660,10 @@ export const trips = sqliteTable(
     plan: text("plan"),
     /** Replacement journey on the ticket of that trip (which then has status "moved"). */
     movedFrom: text("moved_from"),
-    /** When a connection breaks: the fastest way on from there (decides whether the Zugbindung goes). */
+    /** When a connection breaks: the fastest way on from there (how late you'd arrive with it). */
     reroute: text("reroute", { mode: "json" }).$type<RerouteCheck>(),
+    /** DB's own state of the booking (Reisebegleitung, as in the DB Navigator) — wins over the app's estimate. */
+    dbStatus: text("db_status", { mode: "json" }).$type<DbTripStatus>(),
     createdAt: integer("created_at").notNull(),
     updatedAt: integer("updated_at").notNull(),
   },

@@ -83,11 +83,75 @@ export function TodayBanner() {
     load();
   }
 
+  // The banner scrolls away with the page like any content; once it is behind the
+  // sticky header, a one-line version shows right under the header — laid over the
+  // page, so nothing moves (no jumping back and forth at the edge).
+  const fullRef = React.useRef<HTMLDivElement>(null);
+  const [compact, setCompact] = React.useState(false);
+  const [top, setTop] = React.useState(56);
+  const hasItems = items.some((i) => !(i.phase === "after" && i.trip.status !== "planned"));
+  React.useEffect(() => {
+    const el = fullRef.current;
+    if (!el || !hasItems) return;
+    let io: IntersectionObserver | null = null;
+    const setup = () => {
+      io?.disconnect();
+      const h = Math.round(document.querySelector("header")?.getBoundingClientRect().height ?? 56);
+      setTop(h);
+      io = new IntersectionObserver(([e]) => setCompact(!e.isIntersecting && e.boundingClientRect.top < h), { rootMargin: `-${h}px 0px 0px 0px` });
+      io.observe(el);
+    };
+    setup();
+    window.addEventListener("resize", setup);
+    return () => {
+      io?.disconnect();
+      window.removeEventListener("resize", setup);
+    };
+  }, [hasItems]);
+
   const visible = items.filter((i) => !(i.phase === "after" && i.trip.status !== "planned"));
   if (!visible.length) return null;
 
+  let compactBar: React.ReactNode = null;
+  {
+    // the trip under way first, else the next one
+    const main = visible.find((i) => i.phase === "underway") ?? visible[0];
+    const t = main.trip;
+    const leg = main.legIndex != null ? t.legs[main.legIndex] : null;
+    const fc = t.status === "planned" ? tripForecast(t.legs, t.reroute, t.dbStatus) : null;
+    compactBar = (
+      <div className="fixed inset-x-0 z-30 border-b border-primary/20 bg-background/95 shadow-sm backdrop-blur" style={{ top }}>
+        <button
+          type="button"
+          onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
+          className="container flex w-full items-center gap-2 py-1.5 text-left text-xs"
+          title="Alles anzeigen"
+        >
+          <TrainFront className="h-3.5 w-3.5 shrink-0 text-primary" />
+          <span className="min-w-0 flex-1 truncate">
+            {/* what matters first — the station names may get cut off */}
+            {fc?.level === "lifted" && <span className="font-semibold text-danger">⚠ Zugbindung aufgehoben · </span>}
+            {fc?.level === "late" && <span className="font-semibold text-warning">+{fc.delayMin} min · </span>}
+            {main.phase === "underway" ? (
+              <>
+                <b>Unterwegs</b>
+                {leg ? ` ${legLabel(leg)} → ${leg.toName}` : ""}
+              </>
+            ) : (
+              <>
+                <b>{formatTime(t.plannedDeparture)}</b> → {t.destName} · {inMinutes(t.plannedDeparture, now)}
+              </>
+            )}
+          </span>
+          {visible.length > 1 && <span className="shrink-0 text-muted-foreground">+{visible.length - 1}</span>}
+        </button>
+      </div>
+    );
+  }
+
   return (
-    <div className="border-b border-primary/20 bg-primary/5">
+    <div ref={fullRef} className="border-b border-primary/20 bg-primary/5">
+      {compact && compactBar}
       <input
         ref={fileRef}
         type="file"
@@ -112,8 +176,19 @@ export function TodayBanner() {
         {visible.map(({ trip: t, phase, legIndex, nextIndex }) => {
           const leg = legIndex != null ? t.legs[legIndex] : null;
           const next = nextIndex != null ? t.legs[nextIndex] : null;
-          const fc = phase !== "after" && t.status === "planned" ? tripForecast(t.legs, t.reroute) : null;
+          const fc = phase !== "after" && t.status === "planned" ? tripForecast(t.legs, t.reroute, t.dbStatus) : null;
           const dest = t.destName;
+          // later today (> 1 h): one quiet line — the buttons only when it matters
+          const later = phase === "before" && !!t.plannedDeparture && new Date(t.plannedDeparture).getTime() - now > 3600_000;
+          if (later && !(fc && fc.level === "lifted"))
+            return (
+              <Link key={t.id} href={`/reisen/${t.id}`} className="flex items-center gap-2 truncate text-sm text-muted-foreground hover:text-foreground">
+                <TrainFront className="h-4 w-4 shrink-0 text-primary" />
+                <span className="truncate">
+                  <b className="text-foreground">Heute {formatTime(t.plannedDeparture)}</b> → {t.destName} · {inMinutes(t.plannedDeparture, now)}
+                </span>
+              </Link>
+            );
           return (
             <div key={t.id} className="flex flex-col gap-1.5 text-sm sm:flex-row sm:items-center sm:gap-3">
               <div className="flex min-w-0 flex-1 items-start gap-2">
@@ -149,7 +224,7 @@ export function TodayBanner() {
                 {fc && (fc.level === "lifted" || fc.level === "late" || fc.level === "check" || !!fc.breakAt) && (
                   <Link
                     href={`/reisen/${t.id}#ersatz`}
-                    className={cn("mt-0.5 block font-medium", fc.level === "lifted" ? "text-danger" : "text-warning")}
+                    className={cn("mt-0.5 line-clamp-2 font-medium", fc.level === "lifted" ? "text-danger" : "text-warning")}
                   >
                     {fc.level === "lifted" ? "⚠ " : fc.level === "check" ? "🔎 " : "⏱ "}
                     {forecastText(fc, dest)}
@@ -168,7 +243,7 @@ export function TodayBanner() {
                       onClick={() => control(t.id)}
                       title="Fahrkartenkontrolle mit Zeit und Standort speichern"
                     >
-                      {busy === `control-${t.id}` ? <Spinner /> : <ShieldCheck className="h-4 w-4" />} Kontrolliert
+                      {busy === `control-${t.id}` ? <Spinner /> : <ShieldCheck className="h-4 w-4" />} Kontrolle
                     </Button>
                     <Button
                       size="sm"

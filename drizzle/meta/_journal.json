@@ -78,6 +78,13 @@
       "when": 1791663858601,
       "tag": "0010_bizarre_ultimatum",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1792047046768,
+      "tag": "0011_complete_squirrel_girl",
+      "breakpoints": true
     }
   ]
 }

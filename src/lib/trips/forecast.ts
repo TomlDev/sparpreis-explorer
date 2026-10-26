@@ -1,13 +1,15 @@
-import type { RerouteCheck, TripLeg } from "@/db/schema";
+import type { DbTripStatus, RerouteCheck, TripLeg } from "@/db/schema";
+import { dbLifted, dbStatusText } from "./dbStatusText";
 import { delayMin, missedConnections, normalizeLeg } from "./realtime";
 import { isRailLeg } from "./rules";
 
 /**
  * What DB's live data says about a trip *before / while* travelling: will it
- * reach the ticket's destination as booked, and how late? What counts is the
- * delay at the destination: ≥ 20 min lifts the Zugbindung — the moment to pick
- * another train (Flex). A connection that breaks or a cancelled train only does
- * when the fastest way on from there (`reroute`, checked live) is ≥ 20 min late.
+ * reach the ticket's destination as booked, and how late? ≥ 20 min late at the
+ * destination lifts the Zugbindung — the moment to pick another train (Flex).
+ * So does a connection that can't be made or a cancelled train: DB itself then
+ * shows "Zugbindung aufgehoben" (DB Navigator, Oct 2026). The fastest way on
+ * from there (`reroute`, checked live) tells how late you'd arrive with it.
  */
 export interface Forecast {
   /** lifted: Zugbindung lifted · check: a connection breaks, the way on is being checked · late: 5–19 min · ok · none: no live data yet */
@@ -22,7 +24,14 @@ export interface Forecast {
   at: number | null;
   /** Every rail leg has live data. */
   complete: boolean;
+  /** The level comes from DB's own Reisebegleitung (not the app's estimate). */
+  source?: "db";
+  /** DB's verdict in words ("Zugbindung aufgehoben · fahrbar · Alternative möglich"). */
+  dbText?: string;
 }
+
+/** DB's state counts while it is fresh. */
+const DB_FRESH_MS = 30 * 60_000;
 
 export const LIFT_MIN = 20;
 
@@ -33,19 +42,24 @@ const levelOf = (d: number): Forecast["level"] => (d >= LIFT_MIN ? "lifted" : d 
 /** The break decided by the fastest alternative from there (when checked for this very break). */
 function decide(f: Forecast, reroute: RerouteCheck | null | undefined): Forecast {
   if (!f.breakAt) return f;
-  if (!reroute || reroute.breakLeg !== f.breakAt.legIndex) return { ...f, level: "check", reason: `${f.reason} – Ersatzverbindung wird geprüft` };
-  if (reroute.arrival == null) return { ...f, level: "lifted", reason: `${f.reason} – keine Ersatzverbindung mehr gefunden` };
+  const lifted = { ...f, level: "lifted" as const };
+  if (!reroute || reroute.breakLeg !== f.breakAt.legIndex) return { ...lifted, reason: `${f.reason} · schnellster Ersatz wird gesucht` };
+  if (reroute.arrival == null) return { ...lifted, reason: `${f.reason} · keine Ersatzverbindung mehr gefunden` };
   const d = reroute.delayMin ?? 0;
   return {
-    ...f,
-    level: levelOf(d),
+    ...lifted,
     delayMin: d,
-    reason: `${f.reason} – schnellster Ersatz ab ${reroute.from}${reroute.via ? ` (${reroute.via})` : ""}: ${d > 0 ? `+${d}` : "pünktlich"} min am Ziel`,
+    reason: `${f.reason} · Ersatz ab ${reroute.from}${reroute.via ? ` (${reroute.via})` : ""}: ${d > 0 ? `+${d} min` : "pünktlich"} am Ziel`,
   };
 }
 
-export function tripForecast(legs: TripLeg[], reroute?: RerouteCheck | null): Forecast {
-  return decide(bookedForecast(legs), reroute);
+export function tripForecast(legs: TripLeg[], reroute?: RerouteCheck | null, dbs?: DbTripStatus | null, now = Date.now()): Forecast {
+  const own = decide(bookedForecast(legs), reroute);
+  if (!dbs || now - dbs.checkedAt > DB_FRESH_MS) return own;
+  // DB's word wins: lifted when it says so — and only then
+  if (dbLifted(dbs)) return { ...own, level: "lifted", source: "db", dbText: dbStatusText(dbs) };
+  const kept: Forecast["level"] = own.level === "lifted" ? (own.delayMin != null && own.delayMin >= 5 ? "late" : "ok") : own.level;
+  return { ...own, level: own.level === "none" ? "none" : kept, source: "db", dbText: dbStatusText(dbs) };
 }
 
 /** The trip as booked, from the live data of its trains (a break is reported, not judged). */
@@ -100,10 +114,20 @@ export function bookedForecast(legs: TripLeg[]): Forecast {
 
 /** One line for banners / notifications. */
 export function forecastText(f: Forecast, dest: string): string {
-  if (f.level === "lifted")
-    return f.delayMin != null ? `Voraussichtlich +${f.delayMin} min in ${dest} – Zugbindung aufgehoben` : `${f.reason} – Zugbindung aufgehoben`;
-  if (f.level === "check") return f.reason ?? "Anschluss platzt – Ersatzverbindung wird geprüft";
-  if (f.breakAt) return `${f.reason?.split(" – ")[0]} – Ersatz kommt ${f.delayMin && f.delayMin > 0 ? `+${f.delayMin} min` : "pünktlich"} in ${dest} an, Zugbindung bleibt`;
+  if (f.source === "db") {
+    if (f.level === "lifted") return `Laut DB: ${f.dbText}`;
+    const what = f.breakAt
+      ? `Anschluss in ${f.breakAt.station} knapp`
+      : f.level === "late"
+        ? `Voraussichtlich +${f.delayMin} min in ${dest}`
+        : `Pünktlich in ${dest}`;
+    return `${what} – laut DB besteht die Zugbindung`;
+  }
+  if (f.breakAt) {
+    const what = f.reason?.startsWith("Anschluss") ? `Anschluss in ${f.reason.split(" platzt")[0].replace("Anschluss in ", "")} nicht erreichbar` : (f.reason?.split(" · ")[0] ?? "Verbindung unterbrochen");
+    return `${what} – Zugbindung aufgehoben`;
+  }
+  if (f.level === "lifted") return `Voraussichtlich +${f.delayMin} min in ${dest} – Zugbindung aufgehoben`;
   if (f.level === "late") return `Voraussichtlich +${f.delayMin} min in ${dest}`;
   if (f.level === "ok") return `Laut Prognose pünktlich in ${dest}`;
   return "Noch keine Prognose";

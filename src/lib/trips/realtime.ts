@@ -17,18 +17,25 @@ export interface MissedConnection {
   departed: string;
 }
 
-/** Connections that broke: the next train left before the previous one arrived. */
+/** Changing trains takes time: less than this left (Oct 2026: RE in at 11:56, RB out at 11:56 —
+ *  DB already calls that "nicht erreichbar") and the connection is gone. */
+const MIN_CHANGE_MS = 2 * 60_000;
+
+/** Connections that broke: the next train leaves before you can be on it (arrival + change time). */
 export function missedConnections(legs: TripLeg[]): MissedConnection[] {
   const rail = legs.map((l, i) => ({ l, i })).filter(({ l }) => isRailLeg(l));
   const out: MissedConnection[] = [];
+  const t = (iso: string | null | undefined) => (iso ? new Date(iso).getTime() : NaN);
   for (let k = 0; k + 1 < rail.length; k++) {
     const a = rail[k];
     const b = rail[k + 1];
     const arrived = a.l.rt?.arr;
     const departed = b.l.rt?.dep;
     if (!arrived || !departed || b.l.rt?.depCancelled) continue;
-    if (new Date(arrived).getTime() > new Date(departed).getTime())
-      out.push({ afterLeg: a.i, nextLeg: b.i, station: a.l.toName, arrived, departed });
+    // a transfer booked tighter than 2 min only needs what was planned
+    const planned = t(b.l.plannedDeparture) - t(a.l.plannedArrival);
+    const need = Number.isFinite(planned) ? Math.min(MIN_CHANGE_MS, Math.max(0, planned)) : MIN_CHANGE_MS;
+    if (t(departed) - t(arrived) < need) out.push({ afterLeg: a.i, nextLeg: b.i, station: a.l.toName, arrived, departed });
   }
   return out;
 }

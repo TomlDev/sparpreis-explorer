@@ -79,10 +79,10 @@ export async function checkReroute(t: TripRow, now = Date.now()): Promise<Rerout
       addEvent(t.id, {
         type: "delay",
         at: now,
-        text: `${f.reason}. Schnellste Weiterfahrt ab ${check.from} (DB-Live-Fahrplan ${formatTime(new Date(now).toISOString())}): ${
+        text: `${f.reason} – Anschluss nicht erreichbar, Zugbindung aufgehoben. Schnellste Weiterfahrt ab ${check.from} (DB-Live-Fahrplan ${formatTime(new Date(now).toISOString())}): ${
           check.arrival
-            ? `${check.via}, an ${dest.toName} ${formatTime(check.arrival)} (${(check.delayMin ?? 0) > 0 ? `+${check.delayMin}` : "±0"} min) → Zugbindung ${lifted(check) ? "aufgehoben" : "bleibt"}`
-            : "keine Verbindung gefunden → Zugbindung aufgehoben"
+            ? `${check.via}, an ${dest.toName} ${formatTime(check.arrival)} (${(check.delayMin ?? 0) > 0 ? `+${check.delayMin}` : "±0"} min)`
+            : "keine Verbindung gefunden"
         }`,
       });
     }

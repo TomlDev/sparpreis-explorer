@@ -4,7 +4,8 @@ import { browserDir, dbPassword, getDbUser } from "./dbAccount";
 /**
  * Drives bahn.de in a headless Chromium like a person would: log in (only when
  * the stored session expired), open "Meine Reisen" and read the JSON the page
- * itself loads. One browser at a time; it is closed after every run.
+ * itself loads. One browser at a time; it is closed after every run — except the
+ * one tab kept open while a trip is under way (Reisebegleitung).
  */
 
 const START = "https://www.bahn.de/buchung/meine-reisen";
@@ -50,6 +51,84 @@ export interface DbOffer {
 declare global {
   // eslint-disable-next-line no-var
   var __dbBrowser: Promise<unknown> | undefined;
+  /** The bahn.de tab kept open while a trip is under way (Reisebegleitung, see fetchReiseketten). */
+  // eslint-disable-next-line no-var
+  var __dbWatch: { ctx: BrowserContext; page: Page } | undefined;
+}
+
+/** DB's own state of a booked journey ("Reisebegleitung" — what the DB Navigator shows). */
+export interface DbReisekette {
+  status?: string; // FAHRBAR | NICHT_REKONSTRUIERBAR | VORLAEUFIG_NICHT_REKONSTRUIERBAR …
+  alternativensuche?: string; // ALTERNATIVEN_KANN | ALTERNATIVEN_MUSS | ALTERNATIVEN_KEINE
+  relevanteAbweichung?: boolean;
+  auftrag?: { auftragsnummer?: string; zugbindung?: string }; // AUFGEHOBEN | BESTEHT
+  origin?: { name?: string; dateTime?: { local?: string }; rtDateTime?: { local?: string } };
+  destination?: { name?: string; dateTime?: { local?: string }; rtDateTime?: { local?: string } };
+}
+
+const REISEN = "https://www.bahn.de/buchung/reiseuebersicht";
+
+/** One serialized job on the (single) browser profile. */
+async function exclusive<T>(job: () => Promise<T>): Promise<T> {
+  while (globalThis.__dbBrowser) await globalThis.__dbBrowser.catch(() => {});
+  const run = job();
+  globalThis.__dbBrowser = run;
+  try {
+    return await run;
+  } finally {
+    if (globalThis.__dbBrowser === run) globalThis.__dbBrowser = undefined;
+  }
+}
+
+/** Close the kept-open tab (no trip under way, or another job needs the profile). */
+export async function closeDbWatch(): Promise<void> {
+  const w = globalThis.__dbWatch;
+  globalThis.__dbWatch = undefined;
+  await w?.ctx.close().catch(() => {});
+}
+
+/**
+ * The Reisebegleitung of all booked journeys. Keeps one bahn.de tab open between
+ * calls and just reloads it — the page keeps its login fresh itself (its token
+ * lives 5 min), so a new login is only needed when the tab was closed.
+ */
+export async function fetchReiseketten(): Promise<DbReisekette[]> {
+  return exclusive(async () => {
+    // The page asks more than once (first an empty list, then the journeys) — take the fullest answer.
+    const load = async (page: Page) => {
+      const got: DbReisekette[][] = [];
+      const onResponse = async (r: import("playwright").Response) => {
+        if (!r.url().includes("/web/api/reisebegleitung/reiseketten") || r.request().method() !== "GET" || r.status() !== 200) return;
+        try {
+          got.push(((await r.json()) as { reiseketten?: DbReisekette[] }).reiseketten ?? []);
+        } catch {}
+      };
+      page.on("response", onResponse);
+      try {
+        await page.goto(REISEN, { waitUntil: "networkidle", timeout: 45_000 }).catch(() => {});
+        await dismissCookies(page);
+        // late requests after the page settled
+        for (let i = 0; i < 10 && !got.some((l) => l.length); i++) await page.waitForTimeout(1000);
+      } finally {
+        page.off("response", onResponse);
+      }
+      return got.length ? got.reduce((a, b) => (b.length > a.length ? b : a)) : null;
+    };
+    let w = globalThis.__dbWatch;
+    if (w) {
+      const got = await load(w.page).catch(() => null);
+      if (got) return got;
+      await closeDbWatch(); // session gone — start over once
+    }
+    const opened = await openLoggedIn();
+    globalThis.__dbWatch = w = { ctx: opened.ctx, page: opened.page };
+    const got = await load(w.page);
+    if (!got) {
+      await closeDbWatch();
+      throw new Error("Reisebegleitung nicht geladen");
+    }
+    return got;
+  });
 }
 
 export interface DbSession {
@@ -65,17 +144,14 @@ export interface DbSession {
 
 /** Run `fn` with a logged-in bahn.de page (serialized: one browser at a time). */
 export async function withDbSession<T>(fn: (s: DbSession) => Promise<T>): Promise<T> {
-  while (globalThis.__dbBrowser) await globalThis.__dbBrowser.catch(() => {});
-  const run = session(fn);
-  globalThis.__dbBrowser = run;
-  try {
-    return await run;
-  } finally {
-    if (globalThis.__dbBrowser === run) globalThis.__dbBrowser = undefined;
-  }
+  return exclusive(async () => {
+    await closeDbWatch(); // one browser profile — the kept-open tab makes room (reopened on its next call)
+    return session(fn);
+  });
 }
 
-async function session<T>(fn: (s: DbSession) => Promise<T>): Promise<T> {
+/** A headless browser on the app's bahn.de profile, logged in, on "Meine Reisen". */
+async function openLoggedIn(onRequest?: (r: import("playwright").Request) => void): Promise<{ ctx: BrowserContext; page: Page; orders: DbOrderList }> {
   const user = getDbUser();
   const password = dbPassword();
   if (!user || !password) throw new DbLoginError("Benutzername oder Passwort fürs DB-Konto fehlt.");
@@ -85,31 +161,42 @@ async function session<T>(fn: (s: DbSession) => Promise<T>): Promise<T> {
   } catch {
     throw new DbLoginError("Browser-Steuerung (Playwright) ist auf dem Server nicht installiert.");
   }
-  let ctx: BrowserContext | null = null;
+  const ctx = await chromium.launchPersistentContext(browserDir(), {
+    headless: true,
+    locale: "de-DE",
+    timezoneId: "Europe/Berlin",
+    viewport: { width: 1280, height: 900 },
+    userAgent: UA,
+    args: ["--disable-blink-features=AutomationControlled"],
+  });
   try {
-    ctx = await chromium.launchPersistentContext(browserDir(), {
-      headless: true,
-      locale: "de-DE",
-      timezoneId: "Europe/Berlin",
-      viewport: { width: 1280, height: 900 },
-      userAgent: UA,
-      args: ["--disable-blink-features=AutomationControlled"],
-    });
     const page = ctx.pages()[0] ?? (await ctx.newPage());
-    let auth: string | null = null;
-    let profileId: string | null = null;
-    page.on("request", (r) => {
-      if (!r.url().includes("/web/api/")) return;
-      auth = r.headers()["authorization"] ?? auth;
-      if (r.url().includes("/auftrag/v2")) profileId = new URL(r.url()).searchParams.get("kundenprofilId") ?? profileId;
-    });
-
+    if (onRequest) page.on("request", onRequest);
     let orders = await openMeineReisen(page);
     if (!orders) {
       await login(page, user, password);
       orders = await openMeineReisen(page);
       if (!orders) throw new DbLoginError("Nach dem Login war „Meine Reisen“ nicht erreichbar.");
     }
+    return { ctx, page, orders };
+  } catch (e) {
+    await ctx.close().catch(() => {});
+    throw e;
+  }
+}
+
+async function session<T>(fn: (s: DbSession) => Promise<T>): Promise<T> {
+  let ctx: BrowserContext | null = null;
+  try {
+    let auth: string | null = null;
+    let profileId: string | null = null;
+    const opened = await openLoggedIn((r) => {
+      if (!r.url().includes("/web/api/")) return;
+      auth = r.headers()["authorization"] ?? auth;
+      if (r.url().includes("/auftrag/v2")) profileId = new URL(r.url()).searchParams.get("kundenprofilId") ?? profileId;
+    });
+    ctx = opened.ctx;
+    const { page, orders } = opened;
     const api: DbSession["api"] = (method, p, body, headers = {}) =>
       page.evaluate(
         async ({ method, p, body, headers, auth }) => {

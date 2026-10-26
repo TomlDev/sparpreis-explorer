@@ -43,7 +43,7 @@ export function alertFor(t: TripRow, f: Forecast, prev: Sent | undefined): Sent 
 }
 
 export function checkForecastAlert(t: TripRow): void {
-  const f = tripForecast(t.legs, t.reroute);
+  const f = tripForecast(t.legs, t.reroute, t.dbStatus);
   const sent = getSetting<Record<string, Sent>>(KEY) ?? {};
   const next = alertFor(t, f, sent[t.id]);
   if (!next) return;

@@ -68,7 +68,7 @@ function toTripLegs(j: NormJourney): TripLeg[] {
 export function alternativeStart(t: TripRow, now = Date.now()): { name: string; id: string | null; underway: boolean } {
   const first = t.legs[0];
   if (!(now >= ms(t.plannedDeparture))) return { name: first.fromName, id: first.fromId ?? null, underway: false };
-  const f = tripForecast(t.legs, t.reroute);
+  const f = tripForecast(t.legs, t.reroute, t.dbStatus);
   if (f.breakAt) return { name: f.breakAt.station, id: f.breakAt.stationId, underway: true };
   // under way without a break: from the next station where a train leaves
   const next = t.legs.find((l) => !l.isWalking && ms(l.plannedDeparture) > now);
@@ -132,7 +132,7 @@ export async function findAlternatives(tripId: string, opts: { at?: string | nul
     };
   });
   cache.set(tripId, { at: Date.now(), journeys });
-  return { start, when: when.toISOString(), alternatives: list, forecast: tripForecast(t.legs, t.reroute) };
+  return { start, when: when.toISOString(), alternatives: list, forecast: tripForecast(t.legs, t.reroute, t.dbStatus) };
 }
 
 /**
@@ -150,7 +150,7 @@ export function pickAlternative(tripId: string, key: string): TripRow {
   // From a break under way: the part already travelled stays, the new trains follow.
   const startName = legs[0]?.fromName;
   const keep = t.legs[0]?.fromName === startName ? [] : t.legs.slice(0, Math.max(0, t.legs.findIndex((l) => l.fromName === startName)));
-  const f = tripForecast(t.legs, t.reroute);
+  const f = tripForecast(t.legs, t.reroute, t.dbStatus);
   if (t.expectedDelayMin == null && f.delayMin != null) updateTrip(t.id, { expectedDelayMin: f.delayMin });
   const created = createTrip({ legs: [...keep.map((l) => ({ ...l })), ...legs], source: "replacement" });
   const replacement = moveTrip(t.id, { date: created.date, targetId: created.id });

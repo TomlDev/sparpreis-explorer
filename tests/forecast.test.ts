@@ -58,32 +58,34 @@ describe("Prognose vor / während der Fahrt", () => {
     ...o,
   });
 
-  it("Anschluss platzt: erst nach der Ersatz-Prüfung entschieden (Bruchstelle = Abfahrt des Anschlusszugs)", () => {
+  it("Anschluss nicht erreichbar → Zugbindung aufgehoben (wie im DB Navigator); Bruchstelle = Abfahrt des Anschlusszugs", () => {
     const f = tripForecast(broken());
-    expect(f.level).toBe("check");
-    expect(f.reason).toMatch(/Anschluss in Mannheim Hbf platzt \(ICE 612 \+16 min.*wird geprüft/);
+    expect(f.level).toBe("lifted");
+    expect(f.reason).toMatch(/Anschluss in Mannheim Hbf platzt \(ICE 612 \+16 min.*Ersatz wird gesucht/);
     expect(f.breakAt).toMatchObject({ legIndex: 3, station: "Mannheim Hbf" });
+    expect(forecastText(f, "Offenburg")).toBe("Anschluss in Mannheim Hbf nicht erreichbar – Zugbindung aufgehoben");
   });
 
-  it("Anschluss platzt, aber der schnellste Ersatz ist < 20 min später am Ziel → Zugbindung bleibt", () => {
+  it("der schnellste Ersatz sagt, wie spät du ankommst (für Entschädigung / Wahl)", () => {
     const f = tripForecast(broken(), check({}));
-    expect(f).toMatchObject({ level: "late", delayMin: 12 });
-    expect(forecastText(f, "Offenburg")).toMatch(/Ersatz kommt \+12 min in Offenburg an, Zugbindung bleibt/);
-  });
-
-  it("Anschluss platzt und der schnellste Ersatz ist ≥ 20 min später (oder es gibt keinen) → aufgehoben", () => {
-    expect(tripForecast(broken(), check({ arrival: T("12:55"), delayMin: 25 }))).toMatchObject({ level: "lifted", delayMin: 25 });
-    expect(tripForecast(broken(), check({ arrival: null, delayMin: null })).level).toBe("lifted");
+    expect(f).toMatchObject({ level: "lifted", delayMin: 12 });
+    expect(f.reason).toMatch(/· Ersatz ab Mannheim Hbf \(RE 9\): \+12 min am Ziel/);
+    expect(tripForecast(broken(), check({ arrival: null, delayMin: null })).reason).toMatch(/keine Ersatzverbindung/);
     // a check of another (older) break doesn't count
-    expect(tripForecast(broken(), check({ breakLeg: 2 })).level).toBe("check");
+    expect(tripForecast(broken(), check({ breakLeg: 2 })).reason).toMatch(/wird gesucht/);
   });
 
-  it("Zugausfall: ebenfalls über die schnellste Weiterfahrt entschieden", () => {
+  it("0 min zum Umsteigen reicht nicht (DB: nicht erreichbar); 2 min schon", () => {
+    const [a, b, c, d] = trip();
+    expect(tripForecast([a, live(b, "08:05", "08:20"), live(c, "08:30", "11:10"), live(d, "11:10", "12:30")]).level).toBe("lifted");
+    expect(tripForecast([a, live(b, "08:05", "08:20"), live(c, "08:30", "11:08"), live(d, "11:10", "12:30")]).level).toBe("ok");
+  });
+
+  it("Zugausfall → Zugbindung aufgehoben", () => {
     const [a, b, c, d] = trip();
     const legs = [a, live(b, "08:05", "08:20"), live(c, null, null, { depCancelled: true }), live(d, "11:10", "12:30")];
-    expect(tripForecast(legs)).toMatchObject({ level: "check" });
+    expect(tripForecast(legs)).toMatchObject({ level: "lifted" });
     expect(tripForecast(legs).breakAt?.station).toBe("Essen Hbf");
-    expect(tripForecast(legs, check({ breakLeg: 2, from: "Essen Hbf", delayMin: 40, arrival: T("13:10") })).level).toBe("lifted");
   });
 
   it("nimmt die früheste Ankunft (Echtzeit) und überspringt ausgefallene Verbindungen", () => {

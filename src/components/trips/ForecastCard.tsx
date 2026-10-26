@@ -35,7 +35,7 @@ function Time({ planned, rt }: { planned: string | null; rt: string | null }) {
  */
 export function ForecastCard({ t }: { t: TripRow }) {
   const router = useRouter();
-  const f = tripForecast(t.legs, t.reroute);
+  const f = tripForecast(t.legs, t.reroute, t.dbStatus);
   const flexible = t.plan !== "take" || !!t.movedFrom;
   const show = t.status === "planned" && (t.date === today() || f.level !== "none");
   const [open, setOpen] = React.useState(false);
@@ -98,28 +98,40 @@ export function ForecastCard({ t }: { t: TripRow }) {
   if (!show) return null;
   const dest = ticketSpan(t).to;
   const seen = f.at ? new Date(f.at).toLocaleTimeString("de-DE", { timeZone: "Europe/Berlin", hour: "2-digit", minute: "2-digit" }) : null;
-  const tone = f.level === "lifted" ? "border-danger/50 bg-danger/5" : f.level === "late" || f.level === "check" ? "border-warning/50 bg-warning/5" : "";
+  // a broken connection is news even when the Zugbindung stays
+  const warn = f.level === "late" || f.level === "check" || (!!f.breakAt && f.level !== "lifted");
+  const tone = f.level === "lifted" ? "border-danger/50 bg-danger/5" : warn ? "border-warning/50 bg-warning/5" : "";
 
   return (
     <Card id="ersatz" className={cn("scroll-mt-20 p-4", tone)}>
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Prognose</h2>
-        {seen && <span className="text-xs text-muted-foreground">DB-Live-Daten {seen}</span>}
+        <span className="text-xs text-muted-foreground">
+          {f.source === "db" && t.dbStatus
+            ? `DB-Reisebegleitung ${new Date(t.dbStatus.checkedAt).toLocaleTimeString("de-DE", { timeZone: "Europe/Berlin", hour: "2-digit", minute: "2-digit" })}`
+            : seen
+              ? `DB-Live-Daten ${seen}`
+              : ""}
+        </span>
       </div>
       <p
         className={cn(
           "mt-1 font-medium",
-          f.level === "lifted" ? "text-danger" : f.level === "late" || f.level === "check" ? "text-warning" : f.level === "ok" ? "text-success" : "",
+          f.level === "lifted" ? "text-danger" : warn ? "text-warning" : f.level === "ok" ? "text-success" : "",
         )}
       >
         {f.level === "none" ? "Noch keine Live-Daten – die App schaut ab 3 h vor Abfahrt bei jedem Zug nach." : forecastText(f, dest)}
       </p>
-      {f.reason && f.delayMin != null && (f.level !== "ok" || f.breakAt) && <p className="text-sm text-muted-foreground">{f.reason}</p>}
+      {f.reason && (f.delayMin != null || f.source === "db") && (f.level !== "ok" || f.breakAt) && (
+        <p className="text-sm text-muted-foreground">
+          {f.source === "db" ? "Live-Daten: " : ""}
+          {f.reason}
+        </p>
+      )}
       {t.reroute && f.breakAt && t.reroute.breakLeg === f.breakAt.legIndex && (
         <p className="text-xs text-muted-foreground">
-          Geprüft {new Date(t.reroute.checkedAt).toLocaleTimeString("de-DE", { timeZone: "Europe/Berlin", hour: "2-digit", minute: "2-digit" })} im
-          DB-Live-Fahrplan: schnellste Weiterfahrt ab {t.reroute.from} nach {new Date(t.reroute.after).toLocaleTimeString("de-DE", { timeZone: "Europe/Berlin", hour: "2-digit", minute: "2-digit" })}.
-          Maßgeblich ist die Verspätung am Ziel – wird alle 10 min neu geprüft und als Beleg gespeichert.
+          Ersatz geprüft {new Date(t.reroute.checkedAt).toLocaleTimeString("de-DE", { timeZone: "Europe/Berlin", hour: "2-digit", minute: "2-digit" })} (ab{" "}
+          {new Date(t.reroute.after).toLocaleTimeString("de-DE", { timeZone: "Europe/Berlin", hour: "2-digit", minute: "2-digit" })}) · alle 10 min neu · als Beleg gespeichert
         </p>
       )}
       {f.level === "lifted" && (
