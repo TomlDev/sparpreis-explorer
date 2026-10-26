@@ -3,9 +3,9 @@
 import * as React from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, Camera, FileDown, FileText, MapPin, Pencil, ShieldCheck, StickyNote, Trash2 } from "lucide-react";
+import { ArrowLeft, Camera, ChevronDown, FileDown, FileText, MapPin, Pencil, ShieldCheck, StickyNote, Trash2 } from "lucide-react";
 import { AppHeader } from "@/components/AppHeader";
-import { Badge, Button, Card, Input, Spinner } from "@/components/ui";
+import { Button, Card, Input, Spinner } from "@/components/ui";
 import { EventDialog } from "@/components/trips/EventDialog";
 import { ForecastCard } from "@/components/trips/ForecastCard";
 import { STATUS, legColor, legLabel, mapsLink, uploadFiles } from "@/components/trips/tripUi";
@@ -13,7 +13,8 @@ import type { AttachmentRow, ClaimRow, TripEventRow, TripRow } from "@/db/schema
 import { berlinDay, berlinToIso, formatTime, todayLocal } from "@/lib/time";
 import { delayMin, realtimeSummary, type RealtimeSummary } from "@/lib/trips/realtime";
 import { planStates, type PlanInfo } from "@/lib/trips/plan";
-import { arrivalDelayMin, assess, liveHints, movedNotes, onlineClaimType, ticketSpan, type OnlineClaimType } from "@/lib/trips/rules";
+import { tripTicketCover, type TripCover } from "@/lib/trips/ticketCover";
+import { arrivalDelayMin, assess, liftedUsableUntil, liveHints, movedNotes, onlineClaimType, ticketSpan, type OnlineClaimType } from "@/lib/trips/rules";
 import { cn, formatEuro } from "@/lib/utils";
 
 type TripRef = Pick<TripRow, "id" | "date" | "plannedDeparture" | "originName" | "destName">;
@@ -44,6 +45,7 @@ const dayLabel = (d: string) =>
   new Date(`${d}T12:00:00Z`).toLocaleDateString("de-DE", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
 
 const berlinIso = berlinToIso;
+const deDay = (d: string) => new Date(`${d}T12:00:00Z`).toLocaleDateString("de-DE");
 const berlinDate = (iso: string) => berlinDay(iso);
 
 export default function TripPage() {
@@ -130,6 +132,8 @@ export default function TripPage() {
     else loose.push(e);
   }
   const span = ticketSpan(t);
+  // what the ticket covers per leg (from the span the booking names, "+City" = City-Ticket)
+  const cover = tripTicketCover(t.legs, t.ticket);
   const tripDays = [t.date, ...(t.plannedArrival ? [berlinDay(t.plannedArrival)] : [])];
   const rtSum = realtimeSummary(t.legs);
   const delay = arrivalDelayMin(span.arrival, t.actualArrival);
@@ -179,12 +183,12 @@ export default function TripPage() {
           <ArrowLeft className="h-4 w-4" /> Alle Reisen
         </Link>
 
-        {/* Header */}
-        <Card className="p-4">
-          <div className="flex flex-wrap items-start justify-between gap-2">
-            <div>
-              <div className="text-sm text-muted-foreground">{dayLabel(t.date)}</div>
-              <h1 className="text-lg font-semibold">
+        {/* Header — compact: day, status, route, times; the ticket folds out */}
+        <Card className="p-3 sm:p-4">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <div className="text-xs text-muted-foreground">{dayLabel(t.date)}</div>
+              <h1 className="text-base font-semibold leading-snug sm:text-lg">
                 {t.originName} → {t.destName}
               </h1>
               <div className="tabular-nums text-sm">
@@ -195,80 +199,41 @@ export default function TripPage() {
                 )}
                 {t.actualArrival && (
                   <span className={cn("ml-2 font-semibold", (delay ?? 0) >= 60 ? "text-danger" : (delay ?? 0) >= 20 ? "text-warning" : "text-success")}>
-                    {span.to}: tatsächlich {formatTime(t.actualArrival)}
+                    {span.to}: {formatTime(t.actualArrival)}
                     {delay != null && ` (${delay > 0 ? `+${delay}` : delay} min)`}
                   </span>
                 )}
               </div>
             </div>
-            <span className={cn("rounded-full px-2.5 py-1 text-xs font-medium", STATUS[t.status]?.cls)}>
+            <span className={cn("shrink-0 rounded-full px-2.5 py-1 text-xs font-medium", STATUS[t.status]?.cls)}>
               {STATUS[t.status]?.label ?? t.status}
             </span>
           </div>
           <MovedBanner t={t} />
           <PlanRow t={t} plan={plan} rivals={rivals} onSave={patch} />
           {t.ticket?.scheduleChange && (
-            <div className="mt-3 rounded-xl border border-warning/40 bg-warning/10 p-3 text-sm">
-              <b>Fahrplanänderung</b> (Mail der DB vom {new Date(t.ticket.scheduleChange.notifiedAt).toLocaleDateString("de-DE")})
-              {t.ticket.scheduleChange.zugbindungLifted ? (
-                <div>Die DB hat die Zugbindung aufgehoben – du darfst jeden Zug zu deinem Ziel nehmen, auch früher oder auf anderer Route.</div>
-              ) : (
-                <div>Bitte die Verbindung prüfen.</div>
-              )}
+            <div className="mt-2 rounded-xl border border-warning/40 bg-warning/10 p-2.5 text-sm">
+              <b>Fahrplanänderung</b> (Mail vom {new Date(t.ticket.scheduleChange.notifiedAt).toLocaleDateString("de-DE")}):{" "}
+              {t.ticket.scheduleChange.zugbindungLifted
+                ? "Zugbindung aufgehoben – du darfst jeden Zug zu deinem Ziel nehmen, auch früher oder auf anderer Route."
+                : "bitte die Verbindung prüfen."}
             </div>
           )}
-          {t.ticket?.reservationOnly && (
-            <p className="mt-2 text-xs text-muted-foreground">
-              Nur Sitzplatzreservierung
-              {t.ticket.reservationPrice != null ? ` (${formatEuro(t.ticket.reservationPrice)})` : ""} – der Fahrschein war separat
-              (z. B. Deutschland-Ticket). Für Fahrgastrechte zählt der Preis des Fahrscheins.
-            </p>
-          )}
-          <TicketFields t={t} onSave={patch} />
-          {(t.ticket || tickets.length > 0) && (
-            <div className="mt-3 space-y-1 border-t border-border pt-3 text-sm">
-              {t.ticket?.tariff && (
-                <div>
-                  <b>{t.ticket.tariff}</b>
-                  {t.klasse ? ` · ${t.klasse}. Klasse` : ""}
-                  {t.ticket.bahncard ? ` · ${t.ticket.bahncard}` : ""}
-                </div>
-              )}
-              {t.ticket?.from && (
-                <div className="text-muted-foreground">
-                  Ticket: {t.ticket.from} → {t.ticket.to}
-                </div>
-              )}
-              {(() => {
-                // Round-trip tickets list both directions — show this day's trains.
-                const day = t.date.split("-").reverse().join(".");
-                const all = t.ticket?.zugbindung ?? [];
-                const mine = all.filter((z) => z.includes(day));
-                const list = (mine.length ? mine : all).map((z) => z.split(",")[0]);
-                return list.length ? <div className="text-muted-foreground">Zugbindung: {list.join(", ")}</div> : null;
-              })()}
-              {t.ticket?.validity && <div className="text-xs text-muted-foreground">Gültig {t.ticket.validity}</div>}
-              {tickets.map((a) => (
-                <a key={a.id} href={`/api/attachments/${a.id}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-primary underline">
-                  <FileText className="h-4 w-4" /> Ticket öffnen
-                </a>
-              ))}
-            </div>
-          )}
+          <TicketPanel t={t} tickets={tickets} cover={cover} onSave={patch} />
         </Card>
 
         <ForecastCard key={`${t.id}|${t.status}|${t.plan}`} t={t} />
 
-        {/* Quick actions */}
-        <div className="flex flex-wrap gap-2">
-          <Button variant="outline" onClick={() => setDialog({ event: null, type: "control" })}>
-            <ShieldCheck className="h-4 w-4" /> Kontrolliert
+        {/* Quick actions — one row even on a small phone */}
+        <div className="grid grid-cols-3 gap-2">
+          <Button variant="outline" size="sm" className="px-2" onClick={() => setDialog({ event: null, type: "control" })}>
+            <ShieldCheck className="h-4 w-4 shrink-0" /> Kontrolle
           </Button>
-          <Button variant="outline" disabled={busy === "upload"} onClick={() => fileRef.current?.click()}>
-            {busy === "upload" ? <Spinner /> : <Camera className="h-4 w-4" />} Screenshot / Beleg
+          <Button variant="outline" size="sm" className="px-2" disabled={busy === "upload"} onClick={() => fileRef.current?.click()}>
+            {busy === "upload" ? <Spinner /> : <Camera className="h-4 w-4 shrink-0" />} Beleg
           </Button>
-          <Button variant="outline" onClick={() => setDialog({ event: null, type: "note" })}>
-            <StickyNote className="h-4 w-4" /> Notiz
+          <Button variant="outline" size="sm" className="px-2" onClick={() => setDialog({ event: null, type: "note" })}>
+            <StickyNote className="h-4 w-4 shrink-0" /> Notiz
           </Button>
         </div>
         {msg && <p className={cn("text-sm font-medium", msg.ok ? "text-success" : "text-danger")}>{msg.text}</p>}
@@ -287,9 +252,9 @@ export default function TripPage() {
           }}
         />
 
-        {/* Timeline with events */}
-        <Card className="p-4">
-          <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+        {/* Timeline with events — screenshots & receipts as a strip below */}
+        <Card className="p-3 sm:p-4">
+          <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
             <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Verbindung</h2>
             <ActualsControl t={t} sum={rtSum} onLoaded={load} flash={flash} />
           </div>
@@ -310,6 +275,16 @@ export default function TripPage() {
                     <span className="text-xs text-muted-foreground">Züge unbekannt</span>
                   ) : (
                     <span className={cn("rounded px-2 py-0.5 text-xs font-semibold", legColor(l))}>{legLabel(l)}</span>
+                  )}
+                  {cover?.legs[i] === "out" && (
+                    <span className="rounded bg-warning/15 px-1.5 py-0.5 text-[10px] font-semibold text-warning" title="Dieser Abschnitt gehört nicht zum Ticket – eigener Fahrschein nötig">
+                      nicht im Ticket
+                    </span>
+                  )}
+                  {cover?.legs[i] === "city" && (
+                    <span className="rounded bg-success/15 px-1.5 py-0.5 text-[10px] font-semibold text-success" title="Im City-Ticket enthalten (Nahverkehr in der Stadt)">
+                      City-Ticket
+                    </span>
                   )}
                   <span className="text-xs text-muted-foreground">
                     {l.depPlatform ? `Gl. ${l.depPlatform} ` : ""}→ {l.toName} an {formatTime(l.plannedArrival)}
@@ -342,89 +317,12 @@ export default function TripPage() {
               <EventLine key={e.id} e={e} tripId={t.id} tripDays={tripDays} onDeleted={load} onEdit={() => setDialog({ event: e, type: e.type === "note" ? "note" : "control" })} />
             ))}
           </div>
-        </Card>
-
-        <WhatHappened
-          key={`${t.status}|${t.actualArrival}|${t.abortedAt}|${t.expectedDelayMin}|${t.returnedToStart}|${t.notes}`}
-          t={t}
-          saved={whSaved}
-          onMoved={(m) => {
-            flash(m);
-            load();
-          }}
-          onSave={async (b) => {
-            const ok = await patch(b);
-            if (ok) {
-              setWhSaved(true);
-              setTimeout(() => setWhSaved(false), 2000);
-            }
-            return ok;
-          }}
-        />
-
-        {/* Compensation */}
-        <Card className="p-4">
-          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">Fahrgastrechte</h2>
-          {t.status === "moved" ? (
-            <div className="space-y-2 text-sm">
-              <span className="font-semibold">Ticket an einem anderen Tag genutzt</span>
-              {movedNotes(t.expectedDelayMin).notes.map((n) => (
-                <p key={n} className="text-muted-foreground">
-                  {n}
-                </p>
-              ))}
-              {movedNotes(t.expectedDelayMin).warnings.map((n) => (
-                <p key={n} className="text-xs text-warning">
-                  {n}
-                </p>
-              ))}
-            </div>
-          ) : ent ? (
-            <ClaimBox t={t} ent={ent} onDone={load} />
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              {t.status === "planned"
-                ? "Nach der Fahrt oben eintragen, was passiert ist – dann rechnet die App aus, was dir zusteht."
-                : (t.status === "delayed" || t.status === "done") && !t.actualArrival
-                  ? "Trag oben die tatsächliche Ankunft ein – dann rechnet die App aus, ob dir etwas zusteht."
-                  : !span.arrival && t.actualArrival
-                    ? "Die geplante Ankunft ist unbekannt – ohne sie lässt sich die Verspätung nicht berechnen."
-                    : "Laut den DB-Regeln besteht kein Anspruch (Entschädigung erst ab 60 min Verspätung am Ziel)."}
-              {t.status === "planned" && liveHints(t.expectedDelayMin).length > 0 && (
-                <span className="mt-1 block">{liveHints(t.expectedDelayMin)[0]}</span>
-              )}
-            </p>
-          )}
-          <OnlineClaim t={t} onDone={load} flash={flash} />
-          {t.claims.length > 0 && (
-            <div className="mt-3 space-y-2 border-t border-border pt-3">
-              {t.claims.map((c) => (
-                <ClaimLine key={c.id} c={c} tripId={t.id} onSaved={load} />
-              ))}
-            </div>
-          )}
-          {forms.length > 0 && (
-            <div className="mt-2 flex flex-wrap gap-2">
-              {forms.map((a) => (
-                <a key={a.id} href={`/api/attachments/${a.id}?download`} className="inline-flex items-center gap-1 text-sm text-primary underline">
-                  <FileDown className="h-4 w-4" /> {a.filename}
-                </a>
-              ))}
-            </div>
-          )}
-        </Card>
-
-        {/* Evidence */}
-        <Card className="p-4">
-          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-            Screenshots & Belege ({screenshots.length})
-          </h2>
-          {screenshots.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Noch nichts hochgeladen – z. B. Screenshot der Verspätungsprognose im DB Navigator.</p>
-          ) : (
-            <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+          {screenshots.length > 0 && (
+            <div className="mt-3 border-t border-border pt-2">
+              <div className="mb-1 text-xs text-muted-foreground">Screenshots & Belege ({screenshots.length})</div>
+              <div className="flex gap-2 overflow-x-auto pb-1">
               {screenshots.map((a) => (
-                <div key={a.id} className="group relative overflow-hidden rounded-lg border border-border">
+                <div key={a.id} className="group relative w-20 shrink-0 overflow-hidden rounded-lg border border-border">
                   <a href={`/api/attachments/${a.id}`} target="_blank" rel="noreferrer">
                     {a.mime.startsWith("image/") && a.mime !== "image/heic" && a.mime !== "image/heif" ? (
                       // eslint-disable-next-line @next/next/no-img-element
@@ -452,9 +350,91 @@ export default function TripPage() {
                   </div>
                 </div>
               ))}
+              </div>
             </div>
           )}
         </Card>
+
+        {/* What happened + passenger rights in one card; folds when settled */}
+        <OutcomeCard t={t} ent={ent}>
+          <WhatHappened
+            key={`${t.status}|${t.actualArrival}|${t.abortedAt}|${t.expectedDelayMin}|${t.returnedToStart}|${t.notes}`}
+            t={t}
+            saved={whSaved}
+            shots={screenshots.length}
+            onMoved={(m) => {
+              flash(m);
+              load();
+            }}
+            onSave={async (b) => {
+              const ok = await patch(b);
+              if (ok) {
+                setWhSaved(true);
+                setTimeout(() => setWhSaved(false), 2000);
+              }
+              return ok;
+            }}
+          />
+          <div className="mt-4 border-t border-border pt-3">
+            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Fahrgastrechte</h3>
+          {t.status === "lifted" ? (
+            <div className="space-y-1 text-sm">
+              <span className="font-semibold">Ticket offen – Zugbindung aufgehoben</span>
+              <p className="text-muted-foreground">
+                Nutzbar laut DB bis {deDay(liftedUsableUntil(t.date))}. Fährst du damit, oben „Damit gefahren …“ – dort zählt dann eine neue
+                Verspätung. Erstattung gibt es nur bei mind. 60 min angekündigter Verspätung
+                {t.expectedDelayMin != null ? ` (eingetragen: ${t.expectedDelayMin} min)` : ""}.
+              </p>
+            </div>
+          ) : t.status === "moved" ? (
+              <div className="space-y-2 text-sm">
+                <span className="font-semibold">Ticket an einem anderen Tag genutzt</span>
+                {movedNotes(t.expectedDelayMin).notes.map((n) => (
+                  <p key={n} className="text-muted-foreground">
+                    {n}
+                  </p>
+                ))}
+                {movedNotes(t.expectedDelayMin).warnings.map((n) => (
+                  <p key={n} className="text-xs text-warning">
+                    {n}
+                  </p>
+                ))}
+              </div>
+            ) : ent ? (
+              <ClaimBox t={t} ent={ent} onDone={load} />
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                {t.status === "planned"
+                  ? "Nach der Fahrt oben eintragen, was passiert ist – dann rechnet die App aus, was dir zusteht."
+                  : (t.status === "delayed" || t.status === "done") && !t.actualArrival
+                    ? "Trag oben die tatsächliche Ankunft ein – dann rechnet die App aus, ob dir etwas zusteht."
+                    : !span.arrival && t.actualArrival
+                      ? "Die geplante Ankunft ist unbekannt – ohne sie lässt sich die Verspätung nicht berechnen."
+                      : "Laut den DB-Regeln besteht kein Anspruch (Entschädigung erst ab 60 min Verspätung am Ziel)."}
+                {t.status === "planned" && liveHints(t.expectedDelayMin).length > 0 && (
+                  <span className="mt-1 block">{liveHints(t.expectedDelayMin)[0]}</span>
+                )}
+              </p>
+            )}
+            <OnlineClaim t={t} onDone={load} flash={flash} />
+            {t.claims.length > 0 && (
+              <div className="mt-3 space-y-2 border-t border-border pt-3">
+                {t.claims.map((c) => (
+                  <ClaimLine key={c.id} c={c} tripId={t.id} onSaved={load} />
+                ))}
+              </div>
+            )}
+            {forms.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-2">
+                {forms.map((a) => (
+                  <a key={a.id} href={`/api/attachments/${a.id}?download`} className="inline-flex items-center gap-1 text-sm text-primary underline">
+                    <FileDown className="h-4 w-4" /> {a.filename}
+                  </a>
+                ))}
+              </div>
+            )}
+          </div>
+        </OutcomeCard>
 
         <div className="flex justify-end">
           <Button
@@ -634,6 +614,8 @@ function EventLine({
 }) {
   const day = berlinDay(e.at);
   const when = tripDays.includes(day) ? timeOf(e.at) : `${Number(day.slice(8))}.${Number(day.slice(5, 7))}. ${timeOf(e.at)}`;
+  // long entries (e.g. a saved forecast) fold to three lines — tap shows all
+  const [full, setFull] = React.useState(false);
   return (
     <div className="ml-12 flex items-start gap-2 border-l-2 border-dashed border-border py-0.5 pl-3 text-xs">
       {e.type === "control" ? (
@@ -642,7 +624,7 @@ function EventLine({
         <StickyNote className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
       )}
       <div className="min-w-0 flex-1 break-words">
-        <p>
+        <p className={cn(!full && "line-clamp-3")} onClick={() => setFull((f) => !f)}>
           <span className="tabular-nums font-medium">{when}</span> {EVENT_LABEL[e.type] ?? e.type}
           {e.text && <span className="text-muted-foreground"> – {e.text}</span>}
         </p>
@@ -698,14 +680,7 @@ function TicketFields({ t, onSave }: { t: Detail; onSave: (b: Record<string, unk
   const [f, setF] = React.useState(fromTrip);
   if (!open)
     return (
-      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
-        <span>{t.price != null ? formatEuro(t.price) : "Preis fehlt"}</span>
-        <span>{t.orderNumber ? `Auftrag ${t.orderNumber}` : "keine Auftragsnummer"}</span>
-        {t.ticketType && <span>{t.ticketType}</span>}
-        {t.roundTrip && <Badge variant="outline">Hin- und Rückfahrt</Badge>}
-        {t.roundTrip && t.ticket?.directionPrice != null && (
-          <span>diese Richtung {formatEuro(t.ticket.directionPrice)}</span>
-        )}
+      <div className="pt-1">
         <button
           className="text-primary underline"
           onClick={() => {
@@ -780,11 +755,14 @@ function WhatHappened({
   saved,
   onSave,
   onMoved,
+  shots,
 }: {
   t: Detail;
   saved: boolean;
   onSave: (b: Record<string, unknown>) => Promise<boolean>;
   onMoved: (msg: string) => void;
+  /** screenshots / evidence uploaded for the trip */
+  shots: number;
 }) {
   const span = ticketSpan(t);
   const rt = realtimeSummary(t.legs);
@@ -812,19 +790,32 @@ function WhatHappened({
     setMoveTarget("");
   }, [status, moveDate, t.id, t.status]);
 
-  const options: [string, string][] = [
-    ["done", "Wie geplant / pünktlich"],
-    ["delayed", "Verspätet angekommen"],
-    ["aborted", "Unterwegs abgebrochen"],
-    ["not_started", "Nicht angetreten"],
-    ["cancelled", "Zugausfall – nicht gefahren"],
-    // a replacement journey can't be moved on again
-    ...(t.movedFrom ? [] : ([["moved", "Mit dem Ticket später gefahren"]] as [string, string][])),
+  const groups: [string, [string, string][]][] = [
+    [
+      "Gefahren",
+      [
+        ["done", "Pünktlich"],
+        ["delayed", "Verspätet"],
+        ["aborted", "Abgebrochen"],
+      ],
+    ],
+    [
+      "Nicht gefahren",
+      [
+        ["lifted", "Zugbindung aufgehoben – Ticket offen"],
+        ["moved", "Mit dem Ticket später gefahren"],
+        ["not_started", "Erstattung (nicht angetreten)"],
+        ["cancelled", "Zugausfall"],
+      ],
+    ],
   ];
   const needsArrival = status === "delayed" || status === "done";
-  const needsExpected = status === "aborted" || status === "not_started" || status === "moved";
+  const needsExpected = status === "aborted" || status === "not_started" || status === "moved" || status === "lifted";
+  const exp = expected ? Number(expected) : null;
   const hint =
-    status === "cancelled"
+    status === "lifted"
+      ? `Ab 20 min angekündigter Verspätung am Ziel darfst du das Ticket für eine andere Fahrt nutzen – laut DB bis ${deDay(liftedUsableUntil(t.date))}. Screenshot der Prognose aufheben${shots ? ` (${shots} hochgeladen ✓)` : ""}. Entscheiden kannst du später: damit fahren oder Erstattung (nur ab 60 min).`
+      : status === "cancelled"
       ? "Nur wählen, wenn du die Reise deshalb nicht angetreten hast. Mit dem Ticket an einem anderen Tag gefahren: „Mit dem Ticket später gefahren“."
       : status === "moved" && t.status !== "moved"
         ? "Ab 20 min angekündigter Verspätung darfst du mit dem Ticket später fahren, laut DB auch an einem anderen Tag. Die Fahrt, die du dann machst, wird als eigene Fahrt eingetragen – dort zählt eine neue Verspätung."
@@ -833,24 +824,51 @@ function WhatHappened({
         : null;
 
   return (
-    <Card className="p-4">
-      <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">Was ist passiert?</h2>
-      <div className="flex flex-wrap gap-1.5">
-        {options.map(([k, label]) => (
-          <button
-            key={k}
-            onClick={() => setStatus(k)}
-            aria-pressed={status === k}
-            className={cn(
-              "rounded-full border px-3 py-1.5 text-sm",
-              status === k ? "border-primary bg-primary text-primary-foreground" : "border-border hover:bg-muted",
-            )}
-          >
-            {label}
-          </button>
+    <div>
+      <div className="space-y-2">
+        {groups.map(([group, opts]) => (
+          <div key={group} className="flex flex-wrap items-center gap-1.5">
+            <span className="w-full text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{group}</span>
+            {opts
+              // a replacement journey can't be moved on again
+              .filter(([k]) => !(k === "moved" && t.movedFrom))
+              .map(([k, label]) => (
+                <button
+                  key={k}
+                  onClick={() => setStatus(k)}
+                  aria-pressed={status === k}
+                  className={cn(
+                    "rounded-full border px-2.5 py-1 text-xs",
+                    status === k ? "border-primary bg-primary text-primary-foreground" : "border-border hover:bg-muted",
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+          </div>
         ))}
       </div>
       {hint && <p className="mt-2 text-xs text-muted-foreground">{hint}</p>}
+      {status === "lifted" && exp != null && exp < 20 && (
+        <p className="mt-1 text-xs text-warning">Unter 20 min angekündigter Verspätung gilt die Zugbindung noch.</p>
+      )}
+      {/* open ticket: the two ways on */}
+      {t.status === "lifted" && status === "lifted" && (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          <Button size="sm" variant="outline" onClick={() => setStatus("moved")}>
+            Damit gefahren …
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={(t.expectedDelayMin ?? 0) < 60}
+            title={(t.expectedDelayMin ?? 0) < 60 ? "Erstattung erst ab 60 min angekündigter Verspätung" : undefined}
+            onClick={() => setStatus("not_started")}
+          >
+            Erstattung beantragen
+          </Button>
+        </div>
+      )}
       {rt?.arrival ? (
         <p className="mt-2 text-xs">
           Laut DB-Daten: an {span.to} {formatTime(rt.arrival)}
@@ -1002,6 +1020,120 @@ function WhatHappened({
         {busy ? <Spinner /> : saved ? "Gespeichert ✓" : "Speichern"}
       </Button>
       {err && <p className="mt-2 text-sm text-danger">{err}</p>}
+    </div>
+  );
+}
+
+/** The ticket in one line (tariff · price · class); tap → details, PDF, edit. */
+function TicketPanel({
+  t,
+  tickets,
+  cover,
+  onSave,
+}: {
+  t: Detail;
+  tickets: AttachmentRow[];
+  cover: TripCover | null;
+  onSave: (b: Record<string, unknown>) => Promise<boolean>;
+}) {
+  const outside = cover ? t.legs.filter((_, i) => cover.legs[i] === "out") : [];
+  const [open, setOpen] = React.useState(false);
+  // round-trip tickets list both directions — show this day's trains
+  const day = t.date.split("-").reverse().join(".");
+  const zb = t.ticket?.zugbindung ?? [];
+  const zbList = (zb.filter((z) => z.includes(day)).length ? zb.filter((z) => z.includes(day)) : zb).map((z) => z.split(",")[0]);
+  const summary = [
+    t.ticket?.tariff ?? t.ticketType ?? "Ticket",
+    t.price != null ? formatEuro(t.price) : "Preis fehlt",
+    t.klasse ? `${t.klasse}. Kl.` : null,
+    t.ticket?.bahncard ?? null,
+    t.roundTrip ? "Hin+Rück" : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  return (
+    <div className="mt-2 border-t border-border pt-2 text-sm">
+      <button type="button" onClick={() => setOpen((o) => !o)} className="flex w-full items-center gap-2 text-left" aria-expanded={open}>
+        <span className="min-w-0 flex-1 truncate">🎫 {summary}</span>
+        <ChevronDown className={cn("h-4 w-4 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")} />
+      </button>
+      {cover ? (
+        <div className="mt-0.5 text-xs text-muted-foreground">
+          Gilt {cover.from}
+          {cover.cityFrom && <span className="text-success"> + City-Ticket</span>} → {cover.to}
+          {cover.cityTo && <span className="text-success"> + City-Ticket</span>}
+        </div>
+      ) : (
+        t.ticket?.from &&
+        t.ticket.to && (
+          <div className="mt-0.5 text-xs text-muted-foreground">
+            Gilt {t.ticket.from} → {t.ticket.to}
+          </div>
+        )
+      )}
+      {outside.length > 0 && (
+        <div className="mt-0.5 text-xs font-medium text-warning">
+          ⚠ Nicht im Ticket: {outside.map((l) => `${legLabel(l)} ${l.fromName} → ${l.toName}`).join(" · ")}
+        </div>
+      )}
+      {open && (
+        <div className="mt-2 space-y-1 text-xs text-muted-foreground">
+          {t.orderNumber && <div>Auftrag {t.orderNumber}</div>}
+          {t.roundTrip && t.ticket?.directionPrice != null && <div>diese Richtung {formatEuro(t.ticket.directionPrice)}</div>}
+          {zbList.length > 0 && <div>Zugbindung: {zbList.join(", ")}</div>}
+          {t.ticket?.validity && <div>Gültig {t.ticket.validity}</div>}
+          {t.ticket?.reservationOnly && (
+            <div>
+              Nur Sitzplatzreservierung{t.ticket.reservationPrice != null ? ` (${formatEuro(t.ticket.reservationPrice)})` : ""} – der Fahrschein war
+              separat. Für Fahrgastrechte zählt der Preis des Fahrscheins.
+            </div>
+          )}
+          {tickets.map((a) => (
+            <a key={a.id} href={`/api/attachments/${a.id}`} target="_blank" rel="noreferrer" className="mr-3 inline-flex items-center gap-1 text-primary underline">
+              <FileText className="h-3.5 w-3.5" /> Ticket öffnen
+            </a>
+          ))}
+          <TicketFields t={t} onSave={onSave} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * "Was ist passiert?" and the passenger rights in one card. Folded (one line)
+ * when there is nothing to do: still to come, or settled (claim sent / nothing due).
+ */
+function OutcomeCard({ t, ent, children }: { t: Detail; ent: ReturnType<typeof assess>; children: React.ReactNode }) {
+  const past = !!t.plannedDeparture && new Date(t.plannedDeparture).getTime() < Date.now();
+  const sent = t.claims.some((c) => c.status === "submitted" || c.status === "paid" || c.status === "rejected");
+  const settled = sent || (t.status !== "planned" && t.status !== "lifted" && !ent?.payable);
+  const summary =
+    t.status === "planned"
+      ? past
+        ? "Noch offen – eintragen, wie es lief"
+        : "Nach der Fahrt eintragen, was passiert ist"
+      : [
+          STATUS[t.status]?.label ?? t.status,
+          sent
+            ? `Antrag ${t.claims.find((c) => c.status === "paid") ? "ausgezahlt" : t.claims.find((c) => c.status === "rejected") ? "abgelehnt" : "eingereicht"}`
+            : ent?.payable && ent.amount != null
+              ? `${formatEuro(ent.amount)} möglich`
+              : null,
+        ]
+          .filter(Boolean)
+          .join(" · ");
+  const [open, setOpen] = React.useState(() => !(settled || (t.status === "planned" && !past)));
+  return (
+    <Card className="p-3 sm:p-4">
+      <button type="button" onClick={() => setOpen((o) => !o)} className="flex w-full items-center gap-2 text-left" aria-expanded={open}>
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-semibold uppercase tracking-wide text-muted-foreground">Was ist passiert?</span>
+          {!open && <span className="block truncate text-xs text-muted-foreground">{summary}</span>}
+        </span>
+        <ChevronDown className={cn("h-4 w-4 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")} />
+      </button>
+      {open && <div className="mt-3">{children}</div>}
     </Card>
   );
 }
@@ -1033,15 +1165,16 @@ function PlanRow({
   rivals: TripRow[];
   onSave: (b: Record<string, unknown>) => Promise<boolean>;
 }) {
-  if (t.status !== "planned") return null;
   const mine = t.plan === "take" || t.plan === "skip" ? t.plan : null;
+  // only when two bookings really overlap (or a mark was set) — otherwise nothing to decide
+  if (t.status !== "planned" || (!rivals.length && !mine)) return null;
   const btn = (value: "take" | "skip", label: string) => (
     <button
       type="button"
       aria-pressed={mine === value}
       onClick={() => onSave({ plan: mine === value ? null : value })}
       className={cn(
-        "rounded-full border px-3 py-1.5 text-sm",
+        "rounded-full border px-2.5 py-1 text-xs",
         mine === value
           ? value === "take"
             ? "border-success bg-success text-white"
@@ -1053,29 +1186,26 @@ function PlanRow({
     </button>
   );
   return (
-    <div className="mt-3 border-t border-border pt-3 text-sm">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-muted-foreground">Fährst du diese Fahrt?</span>
+    <div className={cn("mt-2 rounded-xl p-2 text-xs", plan?.state === "open" ? "bg-warning/10" : "bg-muted/40")}>
+      {rivals.length > 0 && (
+        <div className="mb-1.5 text-muted-foreground">
+          {plan?.state === "open" ? <b className="text-warning">Doppelt gebucht</b> : "Überschneidet sich"} mit{" "}
+          {rivals.map((r, i) => (
+            <React.Fragment key={r.id}>
+              {i > 0 && ", "}
+              <Link href={`/reisen/${r.id}`} className="text-primary underline">
+                {formatTime(r.plannedDeparture)} → {r.destName}
+              </Link>
+              {r.plan === "take" ? " (nehme ich)" : r.plan === "skip" || r.status === "moved" || r.status === "lifted" ? " (nicht)" : ""}
+            </React.Fragment>
+          ))}
+        </div>
+      )}
+      <div className="flex flex-wrap items-center gap-1.5">
         {btn("take", "✓ Nehme ich")}
         {btn("skip", "✗ Nehme ich nicht")}
+        {plan?.implied && plan.state === "skip" && !mine && <span className="text-muted-foreground">– du nimmst die andere</span>}
       </div>
-      {plan?.state === "open" && <p className="mt-2 text-warning">Am selben Tag doppelt gebucht – markier, welche du nimmst.</p>}
-      {plan?.implied && plan.state === "skip" && !mine && (
-        <p className="mt-2 text-muted-foreground">Du nimmst eine andere Fahrt dieses Tages – diese gilt als nicht wahrgenommen.</p>
-      )}
-      {rivals.length > 0 && (
-        <ul className="mt-2 space-y-0.5 text-xs text-muted-foreground">
-          {rivals.map((r) => (
-            <li key={r.id}>
-              Am selben Tag auch:{" "}
-              <Link href={`/reisen/${r.id}`} className="text-primary underline">
-                {formatTime(r.plannedDeparture)} {r.originName} → {r.destName}
-              </Link>
-              {r.plan === "take" ? " · nehme ich" : r.plan === "skip" || r.status === "moved" ? " · nehme ich nicht" : ""}
-            </li>
-          ))}
-        </ul>
-      )}
     </div>
   );
 }

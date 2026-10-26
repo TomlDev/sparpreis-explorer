@@ -21,8 +21,10 @@ import { berlinToIso } from "@/lib/time";
 
 const TZ = "Europe/Berlin";
 
-/** moved = not taken; the ticket was used for another journey (see movedFrom). */
-export const TRIP_STATUSES = ["planned", "done", "delayed", "aborted", "not_started", "cancelled", "moved"] as const;
+/** moved = not taken; the ticket was used for another journey (see movedFrom).
+ *  lifted = not taken (yet): the Zugbindung went, the ticket is still open — later
+ *  used for another journey (→ moved) or refunded (→ not_started). */
+export const TRIP_STATUSES = ["planned", "done", "delayed", "aborted", "not_started", "cancelled", "moved", "lifted"] as const;
 export type TripStatus = (typeof TRIP_STATUSES)[number];
 
 export interface TripInput {
@@ -109,6 +111,7 @@ export function createTrip(input: TripInput): TripRow {
     plan: null,
     movedFrom: input.movedFrom ?? null,
     reroute: null,
+    dbStatus: null,
     createdAt: now(),
     updatedAt: now(),
   };
@@ -166,6 +169,7 @@ const EDITABLE = [
   "legs",
   "plan",
   "reroute",
+  "dbStatus",
 ] as const;
 type Editable = (typeof EDITABLE)[number];
 

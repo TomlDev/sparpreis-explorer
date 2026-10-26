@@ -45,6 +45,10 @@ export async function POST(req: Request) {
       price: typeof b.price === "number" ? b.price : null,
       klasse: b.klasse === 1 || b.klasse === 2 ? b.klasse : null,
       ticketType: str(b.ticketType),
+      ticket:
+        b.ticket && typeof b.ticket === "object" && str((b.ticket as { from?: unknown }).from) && str((b.ticket as { to?: unknown }).to)
+          ? { from: str((b.ticket as { from?: unknown }).from)!, to: str((b.ticket as { to?: unknown }).to)! }
+          : null,
       notes: str(b.notes),
     });
     return NextResponse.json({ trip });

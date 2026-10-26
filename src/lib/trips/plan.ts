@@ -1,7 +1,8 @@
 /**
- * "Nehme ich wahr?" — when a day has two bookings for the same journey (e.g. a
- * cheap backup ticket), the passenger marks the one they'll take. The others
- * then count as skipped; with no mark yet the day is "open" (decide!).
+ * "Nehme ich wahr?" — two bookings that overlap in time can't both be taken.
+ * Until one is chosen both are ordinary trips, marked "doppelt gebucht" with a
+ * way to decide ("open"). Taking one makes the other a skipped spare; skipping
+ * one (or both — taking neither is fine) changes nothing about the other.
  */
 
 export type Plan = "take" | "skip";
@@ -27,17 +28,15 @@ export interface PlanInfo {
 }
 
 /** Didn't / won't happen as booked. */
-const GONE = new Set(["not_started", "cancelled", "moved"]);
+const GONE = new Set(["not_started", "cancelled", "moved", "lifted"]);
 /** Already happened. */
 const RODE = new Set(["done", "delayed", "aborted"]);
 
-const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9äöüß]/g, "");
 const ms = (iso: string | null) => (iso ? new Date(iso).getTime() : NaN);
 
-/** Same day and the same way (origin → destination), or overlapping in time. */
+/** Overlapping in time — only then can't both be taken. (Not: just the same day / way.) */
 export function competing(a: PlanTrip, b: PlanTrip): boolean {
-  if (a.id === b.id || a.date !== b.date) return false;
-  if (norm(a.originName) === norm(b.originName) && norm(a.destName) === norm(b.destName)) return true;
+  if (a.id === b.id) return false;
   const [a0, a1, b0, b1] = [ms(a.plannedDeparture), ms(a.plannedArrival), ms(b.plannedDeparture), ms(b.plannedArrival)];
   return [a0, a1, b0, b1].every(Number.isFinite) && a0 < b1 && b0 < a1;
 }
@@ -59,10 +58,11 @@ export function planStates(list: PlanTrip[]): Map<string, PlanInfo> {
       out.set(t.id, { state: null, implied: false, rivals: [] });
       continue;
     }
-    // A rival is taken → this one is the spare; all rivals skipped → this is the one.
+    // A rival is taken → this one is the spare. Rivals left out (skipped / not taking) → an
+    // ordinary trip again. Otherwise still to decide.
     const theirs = rivals.map(own);
-    const state: PlanState = theirs.includes("take") ? "skip" : theirs.every((p) => p === "skip") ? "take" : "open";
-    out.set(t.id, { state, implied: true, rivals: rivals.map((r) => r.id) });
+    const state: PlanState = theirs.includes("take") ? "skip" : theirs.every((p) => p === "skip") ? null : "open";
+    out.set(t.id, { state, implied: state !== null, rivals: rivals.map((r) => r.id) });
   }
   return out;
 }

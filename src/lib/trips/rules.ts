@@ -171,6 +171,12 @@ export function assess(t: TripFacts): Entitlement | null {
 const REPLACEMENT_CAVEAT =
   "Ersatzfahrt mit dem Ticket einer anderen Fahrt: Gerechnet ist gegen den Fahrplan dieser Fahrt – so handhabt es die DB in der Praxis meist, offiziell geregelt ist es nicht. Im Antrag die gebuchte Verbindung, diese Ersatzverbindung und die tatsächliche Ankunft angeben (Ausdruck der Ersatzverbindung beilegen).";
 
+/** How long an open ticket (Zugbindung lifted, not travelled) can still be used — per DB: up to a year after the travel date. */
+export function liftedUsableUntil(date: string): string {
+  const [y, m, d] = date.split("-").map(Number);
+  return new Date(Date.UTC(y + 1, m - 1, d)).toISOString().slice(0, 10);
+}
+
 /**
  * Booked trip not taken, ticket used for a journey on another day / time
  * (status "moved"): no claim for this one, only what to keep in mind.

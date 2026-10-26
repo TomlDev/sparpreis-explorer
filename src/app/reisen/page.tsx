@@ -331,6 +331,18 @@ function TripCard({ t, plan, onChanged }: { t: TripRow; plan?: PlanInfo; onChang
                 >
                   ✓ Die nehme ich
                 </button>
+                <button
+                  type="button"
+                  className="rounded border border-border px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground hover:bg-muted"
+                  onClick={async (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    await setPlan(t.id, "skip");
+                    onChanged?.();
+                  }}
+                >
+                  ✗ Nehme ich nicht
+                </button>
               </>
             )}
           </div>
@@ -361,7 +373,7 @@ function NextTrips({ onShown, onChanged }: { onShown: (ids: string[]) => void; o
         setPlans(plans);
         const up = all.filter(
           (t) =>
-            !["not_started", "cancelled", "moved"].includes(t.status) &&
+            !["not_started", "cancelled", "moved", "lifted"].includes(t.status) &&
             plans.get(t.id)?.state !== "skip" &&
             (!t.plannedArrival || new Date(t.plannedArrival).getTime() > now - 3600_000),
         );
@@ -511,11 +523,20 @@ interface Voucher {
   orderNumber: string | null;
   receivedAt: string;
   redeemed: boolean;
+  usedOrder?: string | null;
+  replacedBy?: string | null;
+  autoRedeemed?: boolean;
 }
+type VoucherQuestion =
+  | { kind: "which"; orderNumber: string; date: string; price: number; rest: string; restValue: number; candidates: string[] }
+  | { kind: "used"; orderNumber: string; date: string; price: number; voucher: string };
+const deDate = (d: string) => new Date(`${d}T12:00:00Z`).toLocaleDateString("de-DE");
 
 /** DB vouchers: from mails (remaining value after paying with a voucher) or entered by hand. */
 function Vouchers() {
   const [list, setList] = React.useState<Voucher[]>([]);
+  // which voucher paid for which booking — the mails don't say (see lib/trips/voucherUse)
+  const [questions, setQuestions] = React.useState<VoucherQuestion[]>([]);
   const [open, setOpen] = React.useState(false);
   // opened via "Verwalten" in the search's voucher card (runs before the page rewrites the URL)
   React.useEffect(() => {
@@ -528,6 +549,8 @@ function Vouchers() {
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
         setList(d?.vouchers ?? []);
+        setQuestions(d?.questions ?? []);
+        if (d?.questions?.length) setOpen(true);
         if (window.location.hash === "#gutscheine")
           requestAnimationFrame(() => document.getElementById("gutscheine")?.scrollIntoView({ block: "start" }));
       })
@@ -543,6 +566,7 @@ function Vouchers() {
         return false;
       }
       setList(d.vouchers ?? []);
+      if (d.questions) setQuestions(d.questions);
       return true;
     } catch {
       setErr("Keine Verbindung");
@@ -574,7 +598,10 @@ function Vouchers() {
       €
       <span className="text-xs text-muted-foreground">
         {v.validUntil ? `gültig bis ${new Date(`${v.validUntil}T12:00:00Z`).toLocaleDateString("de-DE")}` : "Gültigkeit unbekannt"}
-        {v.orderNumber ? ` · aus Auftrag ${v.orderNumber}` : ""}
+        {v.orderNumber ? ` · Rest aus Auftrag ${v.orderNumber}` : ""}
+        {v.usedOrder ? ` · eingesetzt für Auftrag ${v.usedOrder}` : ""}
+        {v.replacedBy ? ` · Rest jetzt in ${v.replacedBy}` : ""}
+        {v.autoRedeemed ? " · automatisch erkannt" : ""}
       </span>
       <label className="ml-auto flex items-center gap-1 text-xs">
         <input type="checkbox" checked={v.redeemed} onChange={() => post({ action: "update", number: v.number, redeemed: !v.redeemed })} />{" "}
@@ -597,6 +624,43 @@ function Vouchers() {
       </button>
       {open && (
         <div className="mt-2 text-sm">
+          {questions.map((q) => (
+            <div key={`${q.kind}-${q.orderNumber}`} className="mb-2 rounded-xl border border-warning/40 bg-warning/5 p-2.5">
+              {q.kind === "which" ? (
+                <>
+                  <p>
+                    Für die Buchung vom {deDate(q.date)} ({formatEuro(q.price)}, Auftrag {q.orderNumber}) kam ein Rest-Gutschein über{" "}
+                    {formatEuro(q.restValue)}. Welcher Gutschein wurde eingesetzt?
+                  </p>
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    {q.candidates.map((c) => (
+                      <Button key={c} size="sm" variant="outline" className="font-mono" onClick={() => post({ action: "used", number: c, order: q.orderNumber, replacedBy: q.rest })}>
+                        {c}
+                      </Button>
+                    ))}
+                    <Button size="sm" variant="ghost" onClick={() => post({ action: "resolve", number: q.rest })}>
+                      keiner davon
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p>
+                    Die Buchung vom {deDate(q.date)} (Auftrag {q.orderNumber}) kostete genau {formatEuro(q.price)} – so viel wie Gutschein{" "}
+                    <span className="font-mono">{q.voucher}</span>. Damit bezahlt?
+                  </p>
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    <Button size="sm" variant="outline" onClick={() => post({ action: "used", number: q.voucher, order: q.orderNumber })}>
+                      Ja, eingelöst
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => post({ action: "notUsed", number: q.voucher, order: q.orderNumber })}>
+                      Nein
+                    </Button>
+                  </div>
+                </>
+              )}
+            </div>
+          ))}
           <div className="divide-y divide-border">{openOnes.map(row)}</div>
           <div className="mt-2 flex flex-wrap items-end gap-2 border-t border-border pt-2">
             <Input className="h-8 w-32 font-mono" placeholder="Nummer" value={form.number} onChange={(e) => setForm({ ...form, number: e.target.value })} />
@@ -618,8 +682,8 @@ function Vouchers() {
           </div>
           {err && <p className="mt-1 text-xs text-danger">{err}</p>}
           <p className="mt-2 text-xs text-muted-foreground">
-            Zahlst du mit einem Gutschein, stellt die DB für den Rest einen neuen aus (kommt per Mail) – den alten dann als
-            eingelöst abhaken.
+            Zahlst du mit einem Gutschein, stellt die DB für den Rest einen neuen aus (kommt per Mail). Welcher alte damit weg ist,
+            rechnet die App aus (alter Wert = Preis + Rest) und hakt ihn ab; passen mehrere, fragt sie nach.
           </p>
           {done.length > 0 && (
             <details className="mt-2">

@@ -60,6 +60,7 @@ const STATUS: Record<string, string> = {
   not_started: " (nicht angetreten)",
   cancelled: " (Zugausfall)",
   moved: " (Ticket später genutzt)",
+  lifted: " (Zugbindung aufgehoben – Ticket offen)",
 };
 
 export function buildCalendar(baseUrl: string): string {

@@ -3,6 +3,7 @@ import { db } from "@/db/client";
 import { tripEvents, trips, type TripRow } from "@/db/schema";
 import { getSetting, setSetting } from "@/lib/repo/settings";
 import { addEvent, updateTrip } from "./repo";
+import { inferVoucherUse, type VoucherBooking, type VoucherQuestion } from "./voucherUse";
 
 /**
  * Other DB service mails:
@@ -112,9 +113,20 @@ export interface Voucher {
   number: string;
   value: number;
   validUntil: string | null; // yyyy-MM-dd
+  /** Order it came from (a rest voucher: what was left after paying that order). */
   orderNumber: string | null;
   receivedAt: string;
   redeemed: boolean;
+  /** Order it paid for (known or worked out, see voucherUse). */
+  usedOrder?: string | null;
+  /** The rest voucher DB issued for what was left of it. */
+  replacedBy?: string | null;
+  /** Marked redeemed by the app (old = price + rest), not by the user. */
+  autoRedeemed?: boolean;
+  /** Rest voucher: the user said none of the candidates paid (don't ask again). */
+  useResolved?: boolean;
+  /** Orders this voucher did not pay for (answered "nein"). */
+  notUsedIn?: string[];
 }
 
 export function parseVoucher(subject: string, text: string): Omit<Voucher, "receivedAt" | "redeemed"> | null {
@@ -154,7 +166,10 @@ export function setVoucherRedeemed(number: string, redeemed: boolean): Voucher[]
   return updateVoucher(number, { redeemed });
 }
 
-export function updateVoucher(number: string, patch: Partial<Pick<Voucher, "value" | "validUntil" | "redeemed">>): Voucher[] {
+export function updateVoucher(
+  number: string,
+  patch: Partial<Pick<Voucher, "value" | "validUntil" | "redeemed" | "usedOrder" | "replacedBy" | "autoRedeemed" | "useResolved" | "notUsedIn">>,
+): Voucher[] {
   // Only the fields given — `{ value: undefined }` must not wipe the amount.
   const set = Object.fromEntries(Object.entries(patch).filter(([, x]) => x !== undefined));
   const list = getVouchers().map((v) => (v.number === number ? { ...v, ...set } : v));
@@ -179,4 +194,22 @@ export function deleteVoucher(number: string): Voucher[] {
   const list = getVouchers().filter((v) => v.number !== number);
   setSetting("vouchers", list);
   return list;
+}
+
+/**
+ * Work out which vouchers paid for which bookings (DB's mails don't say):
+ * clear cases are marked redeemed, the rest comes back as questions.
+ */
+export function applyVoucherUse(): VoucherQuestion[] {
+  const orders = new Map<string, VoucherBooking>();
+  for (const t of db.select().from(trips).all()) {
+    // replacement journeys share the order — the booking is the original trip
+    if (!t.orderNumber || t.price == null || t.movedFrom || t.source === "copy" || t.source === "replacement") continue;
+    const prev = orders.get(t.orderNumber);
+    const date = prev && prev.date < t.date ? prev.date : t.date;
+    orders.set(t.orderNumber, { orderNumber: t.orderNumber, price: t.price, date, bookedAt: `${date}T23:59:59.000Z` });
+  }
+  const { redeem, questions } = inferVoucherUse(getVouchers(), [...orders.values()]);
+  for (const r of redeem) updateVoucher(r.number, { redeemed: true, autoRedeemed: true, usedOrder: r.order, replacedBy: r.replacedBy });
+  return questions;
 }

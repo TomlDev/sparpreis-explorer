@@ -8,6 +8,7 @@ export const STATUS: Record<string, { label: string; cls: string; dot: string }>
   not_started: { label: "Nicht angetreten", cls: "bg-danger/15 text-danger", dot: "bg-danger" },
   cancelled: { label: "Zugausfall", cls: "bg-danger/15 text-danger", dot: "bg-danger" },
   moved: { label: "Später gefahren", cls: "bg-primary/15 text-primary", dot: "bg-primary" },
+  lifted: { label: "Ticket offen", cls: "bg-primary/15 text-primary", dot: "bg-primary" },
 };
 
 const PREFIX: Record<string, string> = {
