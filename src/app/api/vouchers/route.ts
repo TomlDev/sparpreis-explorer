@@ -19,7 +19,10 @@ export async function POST(req: Request) {
   const day = (v: unknown) => (v === null ? null : typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : undefined);
   const value = typeof b.value === "number" && Number.isFinite(b.value) ? Math.round(b.value * 100) / 100 : undefined;
   try {
-    if (b.action === "add") return NextResponse.json({ vouchers: addVoucher({ number, value: value ?? 0, validUntil: day(b.validUntil) ?? null }) });
+    if (b.action === "add") {
+      const { vouchers, restored } = addVoucher({ number, value, validUntil: day(b.validUntil) ?? null });
+      return NextResponse.json({ vouchers, restored: !!restored, questions: applyVoucherUse() });
+    }
     if (b.action === "delete") return NextResponse.json({ vouchers: deleteVoucher(number) });
     const order = typeof b.order === "string" ? b.order : null;
     const answered = () => NextResponse.json({ vouchers: getVouchers(), questions: applyVoucherUse() });

@@ -147,6 +147,9 @@ Gebucht ist ein günstiges Ticket mit hoher Flex-Chance, jetzt zählt der Tag se
   schickt die DB dafür einen neuen Gutschein mit der Auftragsnummer – die App rechnet
   alter Wert = Preis + Rest, hakt den passenden alten Gutschein ab und fragt nach, wenn
   mehrere gleich hohe in Frage kommen.
+- **Gutschein eintragen:** Neue Gutscheine sind vorab ein Jahr gültig (Datum vorausgewählt).
+  War er doch nicht eingelöst oder wurde gelöscht, reicht die Nummer – er kommt mit Betrag
+  und Gültigkeit wieder als offen zurück.
 - **Filter und Sortierung:** Preis, Dauer, Umstiege, ICE-Anteil, Fernverkehrs-Abschnitte,
   Flex-Chance, Anschluss-Quote, Ankunfts- statt Abfahrtszeit und mehr.
 - **Alles in der URL:** Suche, Filter, Sortierung, Gruppierung und aufgeklappte Verbindungen
@@ -175,7 +178,8 @@ Gebucht ist ein günstiges Ticket mit hoher Flex-Chance, jetzt zählt der Tag se
 - **Zugbindung aufgehoben, Ticket offen:** Nicht gefahren, weil ≥ 20 min Verspätung
   angekündigt waren (Screenshot hochladen)? Dann bleibt das Ticket als „offen“ stehen – laut
   DB bis zu ein Jahr nutzbar. Später entscheidest du: damit gefahren (wird als Ersatzfahrt
-  verknüpft) oder Erstattung (nur ab 60 min).
+  verknüpft) oder Erstattung (nur ab 60 min). Einen Monat vor Ablauf erinnert die App daran
+  (auch im Kalender-Abo).
 - **Mit dem Ticket später gefahren:** Ab 20 min angekündigter Verspätung darfst du laut DB
   auch an einem anderen Tag fahren (bis zu einem Jahr später). Die gebuchte Fahrt wird dann
   mit der tatsächlich gemachten verknüpft; Entschädigung gibt es pro Ticket nur einmal, für

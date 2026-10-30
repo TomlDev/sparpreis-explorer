@@ -16,7 +16,7 @@ import {
   updateBahnCard,
 } from "@/lib/trips/loyalty";
 import { createTrip } from "@/lib/trips/repo";
-import { addVoucher, deleteVoucher, getVouchers, updateVoucher } from "@/lib/trips/serviceMail";
+import { addVoucher, deleteVoucher, getVouchers, inOneYear, updateVoucher } from "@/lib/trips/serviceMail";
 
 beforeAll(() => ensureReady());
 
@@ -90,6 +90,32 @@ describe("BahnCard, BahnBonus, Aktionen", () => {
     const c = getBahnCards()[0];
     updateBahnCard(c.id, { autoRenew: c.autoRenew, validUntil: undefined, cancelBy: undefined });
     expect(getBahnCards()[0]).toMatchObject({ validUntil: c.validUntil, cancelBy: c.cancelBy });
+  });
+
+  it("Gutschein: neu ein Jahr gültig; eine bekannte Nummer allein holt ihn zurück (auch gelöscht oder abgehakt)", () => {
+    expect(inOneYear(new Date("2026-10-26T10:00:00Z"))).toBe("2027-10-26");
+    expect(inOneYear(new Date("2028-02-29T10:00:00Z"))).toBe("2029-03-01");
+    expect(() => addVoucher({ number: "TESTV0002" })).toThrow(/Betrag/);
+    addVoucher({ number: "TESTV0002", value: 30 });
+    expect(getVouchers().find((v) => v.number === "TESTV0002")?.validUntil).toBe(inOneYear());
+    updateVoucher("TESTV0002", { value: 30, validUntil: "2030-05-01" });
+    // worked out as used, then it wasn't: only the number
+    updateVoucher("TESTV0002", { redeemed: true, autoRedeemed: true, usedOrder: "900000000001" });
+    const r = addVoucher({ number: " testv0002 " });
+    expect(r.restored).not.toBeNull();
+    expect(getVouchers().find((v) => v.number === "TESTV0002")).toMatchObject({
+      value: 30,
+      validUntil: "2030-05-01",
+      redeemed: false,
+      usedOrder: null,
+      notUsedIn: ["900000000001"],
+    });
+    // deleted: still comes back with the number
+    deleteVoucher("TESTV0002");
+    expect(getVouchers().some((v) => v.number === "TESTV0002")).toBe(false);
+    expect(addVoucher({ number: "TESTV0002" }).restored).toMatchObject({ value: 30, validUntil: "2030-05-01" });
+    expect(getVouchers().find((v) => v.number === "TESTV0002")?.redeemed).toBe(false);
+    deleteVoucher("TESTV0002");
   });
 
   it("eine gekündigte BahnCard gilt bis zum Ende weiter, ohne Kündigungs-Erinnerung", () => {

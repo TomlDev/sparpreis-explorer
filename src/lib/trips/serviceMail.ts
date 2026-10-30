@@ -177,22 +177,58 @@ export function updateVoucher(
   return list;
 }
 
-/** A voucher entered by hand (e.g. from the DB account). */
-export function addVoucher(v: { number: string; value: number; validUntil?: string | null }): Voucher[] {
-  const number = v.number.trim().toUpperCase();
+/**
+ * A voucher entered by hand (e.g. from the DB account). A number the app knew
+ * already (ticked off, worked out as used, or deleted) comes back as it was –
+ * open again, with its amount and validity – so the number alone is enough.
+ */
+export function addVoucher(v: { number: string; value?: number | null; validUntil?: string | null }): { vouchers: Voucher[]; restored: Voucher | null } {
+  const number = v.number.trim().toUpperCase().replace(/\s+/g, "");
   if (!/^[A-Z0-9]{5,20}$/.test(number)) throw new Error("Gutscheinnummer ungültig");
-  if (!(v.value > 0)) throw new Error("Betrag fehlt");
   const list = getVouchers();
-  const have = list.find((x) => x.number === number);
-  if (have) return updateVoucher(number, { value: v.value, validUntil: v.validUntil ?? have.validUntil, redeemed: false });
-  const next = [...list, { number, value: v.value, validUntil: v.validUntil ?? null, orderNumber: null, receivedAt: new Date().toISOString(), redeemed: false }];
+  const deleted = getSetting<Voucher[]>("vouchersDeleted") ?? [];
+  const known = list.find((x) => x.number === number) ?? deleted.find((x) => x.number === number) ?? null;
+  const value = v.value != null && v.value > 0 ? v.value : known?.value;
+  if (!(value != null && value > 0)) throw new Error("Gutschein unbekannt – Betrag eintragen");
+  if (known) {
+    // it didn't pay for that booking after all: forget the link, and don't work it out as used again
+    const restored: Voucher = {
+      ...known,
+      value,
+      validUntil: v.validUntil ?? known.validUntil,
+      redeemed: false,
+      usedOrder: null,
+      replacedBy: null,
+      autoRedeemed: false,
+      notUsedIn: [...new Set([...(known.notUsedIn ?? []), ...(known.usedOrder ? [known.usedOrder] : [])])],
+    };
+    const others = list.filter((x) => x.number !== number);
+    // its rest voucher no longer points back to it
+    const rest = known.replacedBy ? others.find((x) => x.number === known.replacedBy) : undefined;
+    if (rest) rest.useResolved = true;
+    const next = [...others, restored];
+    setSetting("vouchers", next);
+    setSetting("vouchersDeleted", deleted.filter((x) => x.number !== number));
+    return { vouchers: next, restored: known };
+  }
+  const next = [...list, { number, value, validUntil: v.validUntil ?? inOneYear(), orderNumber: null, receivedAt: new Date().toISOString(), redeemed: false }];
   setSetting("vouchers", next);
-  return next;
+  return { vouchers: next, restored: null };
 }
 
+/** DB vouchers are valid for a year from issue (yyyy-MM-dd, Berlin). */
+export function inOneYear(now = new Date()): string {
+  const [y, m, d] = now.toLocaleDateString("sv-SE", { timeZone: "Europe/Berlin" }).split("-").map(Number);
+  return new Date(Date.UTC(y + 1, m - 1, d)).toISOString().slice(0, 10); // 29.02. → 01.03.
+}
+
+/** Removed from the list, but kept aside so the number alone can bring it back (see addVoucher). */
 export function deleteVoucher(number: string): Voucher[] {
-  const list = getVouchers().filter((v) => v.number !== number);
+  const all = getVouchers();
+  const gone = all.find((v) => v.number === number);
+  const list = all.filter((v) => v.number !== number);
   setSetting("vouchers", list);
+  if (gone) setSetting("vouchersDeleted", [...(getSetting<Voucher[]>("vouchersDeleted") ?? []).filter((v) => v.number !== number), gone]);
   return list;
 }
 

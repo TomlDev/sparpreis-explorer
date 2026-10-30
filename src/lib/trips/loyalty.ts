@@ -6,6 +6,7 @@ import { newId } from "@/db/util";
 import { todayLocal } from "@/lib/time";
 
 const berlinDay = (ms: number) => new Date(ms).toLocaleDateString("sv-SE", { timeZone: "Europe/Berlin" });
+import { liftedUsableUntil } from "./rules";
 import { germanDate, getVouchers } from "./serviceMail";
 
 /**
@@ -230,7 +231,7 @@ export interface Reminder {
   date: string; // yyyy-MM-dd
   title: string;
   detail: string;
-  kind: "bahncard" | "points" | "voucher" | "claim" | "trip";
+  kind: "bahncard" | "points" | "voucher" | "claim" | "trip" | "ticket";
   href?: string;
 }
 
@@ -290,6 +291,18 @@ export function reminders(today = todayLocal()): Reminder[] {
       detail: `Eingereicht am ${new Date(claim.submittedAt).toLocaleDateString("de-DE", { timeZone: "Europe/Berlin" })} (${trip.originName} → ${trip.destName}, Fahrt vom ${trip.date.split("-").reverse().join(".")}). Die DB antwortet meist innerhalb eines Monats – sonst beim Servicecenter nachfragen.`,
       kind: "claim",
       href: `/reisen/${trip.id}`,
+    });
+  }
+  // Open tickets (Zugbindung lifted, not travelled yet): usable up to a year after the travel day.
+  for (const t of db.select().from(trips).where(eq(trips.status, "lifted")).all()) {
+    const until = liftedUsableUntil(t.date);
+    out.push({
+      id: `lifted-${t.id}`,
+      date: until,
+      title: `Offenes Ticket ${t.originName} → ${t.destName} läuft ab`,
+      detail: `Zugbindung aufgehoben (Fahrt vom ${t.date.split("-").reverse().join(".")}${t.price != null ? `, ${t.price.toLocaleString("de-DE", { minimumFractionDigits: 2 })} €` : ""}) – bis ${until.split("-").reverse().join(".")} damit fahren.`,
+      kind: "ticket",
+      href: `/reisen/${t.id}`,
     });
   }
   // Past trips nobody told the app about.

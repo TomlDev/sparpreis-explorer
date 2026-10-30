@@ -42,6 +42,11 @@ const shiftMonth = (ym: string, d: number) => {
   return `${Math.floor(i / 12)}-${String((i % 12) + 1).padStart(2, "0")}`;
 };
 const todayStr = () => new Date().toLocaleDateString("sv-SE", { timeZone: "Europe/Berlin" });
+/** default validity of a new voucher: a year from today */
+const inOneYear = () => {
+  const [y, m, d] = todayStr().split("-").map(Number);
+  return new Date(Date.UTC(y + 1, m - 1, d)).toISOString().slice(0, 10);
+};
 
 export default function TripsPage() {
   const [month, setMonth] = React.useState(() => todayStr().slice(0, 7));
@@ -542,8 +547,11 @@ function Vouchers() {
   React.useEffect(() => {
     if (window.location.hash === "#gutscheine") setOpen(true);
   }, []);
-  const [form, setForm] = React.useState({ number: "", value: "", validUntil: "" });
+  // date preset to a year from today; untouched it isn't sent, so a known number keeps its own
+  const blank = () => ({ number: "", value: "", validUntil: inOneYear(), dateSet: false });
+  const [form, setForm] = React.useState(blank);
   const [err, setErr] = React.useState<string | null>(null);
+  const [note, setNote] = React.useState<string | null>(null);
   React.useEffect(() => {
     fetch("/api/vouchers")
       .then((r) => (r.ok ? r.json() : null))
@@ -556,33 +564,36 @@ function Vouchers() {
       })
       .catch(() => {});
   }, []);
-  async function post(body: Record<string, unknown>): Promise<boolean> {
+  async function post(body: Record<string, unknown>): Promise<Record<string, unknown> | null> {
     setErr(null);
+    setNote(null);
     try {
       const res = await fetch("/api/vouchers", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const d = await res.json().catch(() => ({}));
       if (!res.ok) {
         setErr(d.error ?? "Fehler");
-        return false;
+        return null;
       }
       setList(d.vouchers ?? []);
       if (d.questions) setQuestions(d.questions);
-      return true;
+      return d;
     } catch {
       setErr("Keine Verbindung");
-      return false;
+      return null;
     }
   }
   const t = todayStr();
   const openOnes = list.filter((v) => !v.redeemed && (!v.validUntil || v.validUntil >= t)).sort((a, b) => b.value - a.value);
   const done = list.filter((v) => !openOnes.includes(v)).sort((a, b) => b.receivedAt.localeCompare(a.receivedAt));
   const sum = openOnes.reduce((x, v) => x + (v.value ?? 0), 0);
+  const typed = form.number.trim().toUpperCase().replace(/\s+/g, "");
+  const known = typed.length >= 5 ? list.find((v) => v.number === typed) : undefined;
   const row = (v: Voucher) => (
     <div key={v.number} className={cn("flex flex-wrap items-center gap-x-3 gap-y-1 py-1.5", v.redeemed && "opacity-50")}>
       <CopyCode code={v.number} />
       <Input
         key={`${v.number}-${v.value}`}
-        className="h-7 w-20 text-right"
+        className="h-7 w-24 text-right"
         inputMode="decimal"
         placeholder="?"
         defaultValue={v.value != null ? v.value.toFixed(2).replace(".", ",") : ""}
@@ -663,23 +674,58 @@ function Vouchers() {
           ))}
           <div className="divide-y divide-border">{openOnes.map(row)}</div>
           <div className="mt-2 flex flex-wrap items-end gap-2 border-t border-border pt-2">
-            <Input className="h-8 w-32 font-mono" placeholder="Nummer" value={form.number} onChange={(e) => setForm({ ...form, number: e.target.value })} />
-            <Input className="h-8 w-24" inputMode="decimal" placeholder="Betrag €" value={form.value} onChange={(e) => setForm({ ...form, value: e.target.value })} />
-            <Input className="h-8 w-36" type="date" value={form.validUntil} onChange={(e) => setForm({ ...form, validUntil: e.target.value })} aria-label="gültig bis" />
+            <Input
+              className="h-8 w-32 font-mono"
+              placeholder="Nummer"
+              value={form.number}
+              onChange={(e) => setForm({ ...form, number: e.target.value })}
+            />
+            <Input
+              className="h-8 w-24"
+              inputMode="decimal"
+              placeholder={known ? (known.value ?? 0).toFixed(2).replace(".", ",") : "Betrag €"}
+              value={form.value}
+              onChange={(e) => setForm({ ...form, value: e.target.value })}
+            />
+            <Input
+              className="h-8 w-36"
+              type="date"
+              value={form.dateSet || !known?.validUntil ? form.validUntil : known.validUntil}
+              onChange={(e) => setForm({ ...form, validUntil: e.target.value, dateSet: true })}
+              aria-label="gültig bis"
+            />
             <Button
               size="sm"
               variant="outline"
               onClick={async () => {
-                const value = Number(form.value.replace(",", "."));
-                if (!form.number.trim() || !form.value.trim() || !Number.isFinite(value) || value <= 0)
-                  return setErr("Nummer und Betrag eintragen.");
-                if (await post({ action: "add", number: form.number, value, validUntil: form.validUntil || null }))
-                  setForm({ number: "", value: "", validUntil: "" });
+                const raw = form.value.trim();
+                const value = Number(raw.replace(",", "."));
+                if (!form.number.trim()) return setErr("Nummer eintragen.");
+                if (raw && (!Number.isFinite(value) || value <= 0)) return setErr("Betrag ungültig.");
+                const d = await post({
+                  action: "add",
+                  number: form.number,
+                  ...(raw ? { value } : {}),
+                  ...(form.dateSet || !known ? { validUntil: form.validUntil || null } : {}),
+                });
+                if (!d) return;
+                setForm(blank());
+                if (d.restored) setNote(`${form.number.trim().toUpperCase()} ist wieder offen – Betrag und Gültigkeit wie zuvor.`);
               }}
             >
-              Hinzufügen
+              {known?.redeemed ? "Wieder aktivieren" : "Hinzufügen"}
             </Button>
           </div>
+          {known && !err && (
+            <p className="mt-1 text-xs text-muted-foreground">
+              {known.redeemed
+                ? `Bekannt: ${formatEuro(known.value ?? 0)}${known.validUntil ? `, gültig bis ${deDate(known.validUntil)}` : ""}${
+                    known.usedOrder ? `, war für Auftrag ${known.usedOrder} abgehakt` : ", war abgehakt"
+                  }. Die Nummer reicht – er wird wieder als offen geführt.`
+                : `Schon offen in der Liste (${formatEuro(known.value ?? 0)}).`}
+            </p>
+          )}
+          {note && <p className="mt-1 text-xs text-success">{note}</p>}
           {err && <p className="mt-1 text-xs text-danger">{err}</p>}
           <p className="mt-2 text-xs text-muted-foreground">
             Zahlst du mit einem Gutschein, stellt die DB für den Rest einen neuen aus (kommt per Mail). Welcher alte damit weg ist,
