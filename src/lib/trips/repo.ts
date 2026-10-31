@@ -128,6 +128,11 @@ export function listTrips(from: string, to: string): TripRow[] {
     .all();
 }
 
+/** Trips not travelled whose ticket is still open (Zugbindung lifted), any date. */
+export function openTickets(): TripRow[] {
+  return db.select().from(trips).where(eq(trips.status, "lifted")).orderBy(asc(trips.date), asc(trips.plannedDeparture)).all();
+}
+
 export function getTrip(id: string): TripDetail | null {
   const t = db.select().from(trips).where(eq(trips.id, id)).get();
   if (!t) return null;

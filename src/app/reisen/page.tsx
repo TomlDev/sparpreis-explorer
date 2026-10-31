@@ -10,6 +10,7 @@ import { BahnCards, CalendarSubscribe, Promos, Reminders, useAccount } from "@/c
 import { STATUS, legColor, legLabel } from "@/components/trips/tripUi";
 import type { TripRow } from "@/db/schema";
 import { planStates, type PlanInfo } from "@/lib/trips/plan";
+import { liftedUsableUntil } from "@/lib/trips/rules";
 import { berlinToIso, formatTime } from "@/lib/time";
 import { cn, formatEuro } from "@/lib/utils";
 
@@ -269,6 +270,7 @@ export default function TripsPage() {
         {acc && <Reminders list={acc.reminders} />}
         <ClaimsSummary key={`c${rev}`} />
         {acc && <BahnCards acc={acc} act={act} />}
+        <OpenTickets key={`o${rev}`} />
         <Vouchers key={`v${rev}`} />
         {acc && <Promos list={acc.promos} />}
         {acc && <CalendarSubscribe url={acc.calendarUrl} act={act} />}
@@ -515,6 +517,78 @@ function ClaimsSummary() {
               </span>
             </Link>
           ))}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+/** Tickets not used yet (Zugbindung lifted): usable up to a year after their travel day – any month. */
+function OpenTickets() {
+  const [list, setList] = React.useState<TripRow[] | null>(null);
+  const [open, setOpen] = React.useState(true);
+  React.useEffect(() => {
+    fetch("/api/trips?status=lifted")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setList(d?.trips ?? []))
+      .catch(() => {});
+  }, []);
+  if (!list?.length) return null;
+  const t = todayStr();
+  const days = (d: string) => Math.round((Date.parse(`${d}T12:00:00Z`) - Date.parse(`${t}T12:00:00Z`)) / 86_400_000);
+  // a round trip's price is for both directions – this ticket is one of them
+  const worth = (x: TripRow) => x.ticket?.directionPrice ?? (x.price != null ? (x.roundTrip ? x.price / 2 : x.price) : null);
+  const rows = list.map((x) => ({ x, until: liftedUsableUntil(x.date) })).sort((a, b) => a.until.localeCompare(b.until));
+  const valid = rows.filter((r) => r.until >= t);
+  const expired = rows.filter((r) => r.until < t);
+  const sum = valid.reduce((n, r) => n + (worth(r.x) ?? 0), 0);
+  // the ticket's own places ("Bochum+City" → "Bochum") read shorter than the first / last stop
+  const place = (ticket: string | null | undefined, stop: string) => ticket?.replace(/\+City$/i, "").trim() || stop;
+  const row = ({ x, until }: { x: TripRow; until: string }) => {
+    const d = days(until);
+    const p = worth(x);
+    return (
+      <Link key={x.id} href={`/reisen/${x.id}`} className="block py-1.5 hover:bg-muted/40">
+        <span className="flex items-baseline gap-3">
+          <span className="min-w-0 flex-1">{place(x.ticket?.from, x.originName)} → {place(x.ticket?.to, x.destName)}</span>
+          {p != null && <span className="tabular-nums">{formatEuro(p)}</span>}
+        </span>
+        <span className="block text-xs text-muted-foreground">
+          Fahrt vom {deDate(x.date)} ·{" "}
+          <span className={cn(d >= 0 && d <= 31 && "font-semibold text-warning")}>
+            {d < 0 ? `abgelaufen am ${deDate(until)}` : `nutzbar bis ${deDate(until)}${d <= 60 ? ` (noch ${d} T.)` : ""}`}
+          </span>
+          {x.orderNumber ? ` · Auftrag ${x.orderNumber}` : ""}
+        </span>
+      </Link>
+    );
+  };
+  return (
+    <Card className="p-3 sm:p-4">
+      <button className="flex w-full flex-wrap items-baseline gap-x-3 gap-y-1 text-left text-sm" onClick={() => setOpen((o) => !o)}>
+        <span className="font-semibold">Offene Tickets</span>
+        {valid.length ? (
+          <span>
+            <b>{formatEuro(sum)}</b> in {valid.length} {valid.length === 1 ? "Ticket" : "Tickets"}
+          </span>
+        ) : (
+          <span className="text-muted-foreground">keine mehr nutzbar</span>
+        )}
+        <span className="ml-auto text-xs text-muted-foreground">{open ? "ausblenden" : "anzeigen"}</span>
+      </button>
+      {open && (
+        <div className="mt-2 text-sm">
+          <div className="divide-y divide-border">{valid.map(row)}</div>
+          <p className="mt-2 text-xs text-muted-foreground">
+            Zugbindung aufgehoben, noch nicht gefahren: laut DB bis ein Jahr nach dem Reisetag nutzbar, auf der Strecke des Tickets mit
+            jedem Zug. Fährst du damit, in der Fahrt „Damit gefahren …“ wählen.
+          </p>
+          {expired.length > 0 && (
+            <details className="mt-2">
+              <summary className="cursor-pointer text-xs text-muted-foreground">{expired.length} abgelaufen</summary>
+              <div className="divide-y divide-border opacity-60">{expired.map(row)}</div>
+            </details>
+          )}
         </div>
       )}
     </Card>

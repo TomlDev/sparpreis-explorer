@@ -180,6 +180,9 @@ Gebucht ist ein günstiges Ticket mit hoher Flex-Chance, jetzt zählt der Tag se
   DB bis zu ein Jahr nutzbar. Später entscheidest du: damit gefahren (wird als Ersatzfahrt
   verknüpft) oder Erstattung (nur ab 60 min). Einen Monat vor Ablauf erinnert die App daran
   (auch im Kalender-Abo).
+- **Offene Tickets auf einen Blick:** Unter „Reisen“ listet eine eigene Karte alle noch nicht
+  genutzten Tickets aus allen Monaten – mit Wert, Fahrtdatum und „nutzbar bis“, das zuerst
+  ablaufende oben.
 - **Mit dem Ticket später gefahren:** Ab 20 min angekündigter Verspätung darfst du laut DB
   auch an einem anderen Tag fahren (bis zu einem Jahr später). Die gebuchte Fahrt wird dann
   mit der tatsächlich gemachten verknüpft; Entschädigung gibt es pro Ticket nur einmal, für

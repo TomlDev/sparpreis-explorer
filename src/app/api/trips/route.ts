@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import type { TripLeg } from "@/db/schema";
 import { ensureReady } from "@/lib/bootstrap";
-import { createTrip, listTrips } from "@/lib/trips/repo";
+import { createTrip, listTrips, openTickets } from "@/lib/trips/repo";
 
 export const runtime = "nodejs";
 
@@ -10,6 +10,8 @@ const DAY = /^\d{4}-\d{2}-\d{2}$/;
 export async function GET(req: Request) {
   ensureReady();
   const q = new URL(req.url).searchParams;
+  // open tickets (Zugbindung lifted, not travelled) of any date
+  if (q.get("status") === "lifted") return NextResponse.json({ trips: openTickets() });
   const from = q.get("from") ?? "";
   const to = q.get("to") ?? "";
   if (!DAY.test(from) || !DAY.test(to)) return NextResponse.json({ error: "from/to (yyyy-MM-dd) fehlen" }, { status: 400 });
