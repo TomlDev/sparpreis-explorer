@@ -114,13 +114,15 @@ export class MotisProvider implements RailProvider {
     });
     const ms = Date.now() - started;
     if (!res.ok) {
-      dlog("motis", `${path} -> ${res.status} (${ms}ms)`, { params });
-      throw new ProviderError(`motis ${res.status}`, {
+      // a 404 naming the problem ("unknown feed id …") is our request, not a flaky node
+      const why = res.status === 404 ? ((await res.json().catch(() => null)) as { error?: string } | null)?.error : undefined;
+      dlog("motis", `${path} -> ${res.status} (${ms}ms)${why ? ` ${why}` : ""}`, { params });
+      throw new ProviderError(`motis ${res.status}${why ? ` (${why})` : ""}`, {
         status: res.status,
         isRateLimit: res.status === 429,
         isBlocked: res.status === 403,
         // Transitous is a flaky community instance: 404/5xx/429 are transient.
-        retryable: res.status === 404 || res.status === 429 || res.status >= 500,
+        retryable: (res.status === 404 && !why) || res.status === 429 || res.status >= 500,
       });
     }
     dlog("motis", `${path} -> ${res.status} (${ms}ms)`);
@@ -157,6 +159,12 @@ export class MotisProvider implements RailProvider {
   }
 
   async searchJourneys(from: string, to: string, opts: SearchJourneysOptions): Promise<NormJourneysResult> {
+    // MOTIS stop ids carry their feed ("de-DELFI_…"); a bare DB number (learned from DB's
+    // answers) is refused with 404 "unknown feed id" – don't ask at all
+    if (opts.via && !opts.via.includes("_")) {
+      dlog("motis", `skip via ${opts.via} (no MOTIS stop id)`);
+      return { journeys: [] };
+    }
     const modes = this.buildModes(opts.products);
     const time = (opts.departure ?? opts.arrival ?? new Date()).toISOString();
     const params: Record<string, string | number | boolean | undefined> = {

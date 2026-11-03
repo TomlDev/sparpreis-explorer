@@ -152,6 +152,10 @@ Gebucht ist ein günstiges Ticket mit hoher Flex-Chance, jetzt zählt der Tag se
   und Gültigkeit wieder als offen zurück.
 - **Filter und Sortierung:** Preis, Dauer, Umstiege, ICE-Anteil, Fernverkehrs-Abschnitte,
   Flex-Chance, Anschluss-Quote, Ankunfts- statt Abfahrtszeit und mehr.
+- **Ehrlich, wenn Daten fehlen:** Blockt die DB Abfragen (Bot-Schutz) oder hat der offene
+  Fahrplan einen Tag noch nicht (nach dem Fahrplanwechsel im Dezember), sagt die Suche das,
+  statt einfach wenig zu finden. Kennt die DB einen Start-Halt im neuen Fahrplan noch nicht,
+  fragt sie ab dem Ersatz-Start (z. B. dem Hbf).
 - **Alles in der URL:** Suche, Filter, Sortierung, Gruppierung und aufgeklappte Verbindungen
   stehen jederzeit in der Adresse – Neuladen oder ein geteilter Link zeigt genau das, was du
   siehst (die Ergebnisse kommen dabei aus dem Cache, ohne neue Abfragen). Wer die Startseite

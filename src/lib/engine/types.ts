@@ -101,6 +101,11 @@ export interface SearchMeta {
   anchorPrice: number | null;
   /** true when the daily DB price-check cap is reached (no more live pricing today). */
   dailyCapReached: boolean;
+  /** DB requests of this run refused by DB's bot protection (HTTP 403) — results / prices incomplete. */
+  dbRefused?: number;
+  /** The open timetable (MOTIS / Transitous) has no regional trains on that day yet – e.g. right after
+   *  the timetable change in December. Only DB's own connections are searched then. */
+  timetableGap?: boolean;
   /** unpriced candidates whose via hasn't been tried yet — genuinely priceable. */
   priceableRemaining: number;
   // progress

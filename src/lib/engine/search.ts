@@ -7,6 +7,7 @@ import { newId, now } from "@/db/util";
 import { DB_BUDGET, DB_DAILY_CAP, DB_JITTER_MS, MOTIS_BUDGET, TTL } from "@/lib/config";
 import { addAttemptedVias, addDbUsageToday, dbUsageToday, getAttemptedVias, getPreferences } from "@/lib/repo/settings";
 import { isLongDistanceProduct } from "@/lib/domain/products";
+import { refusedRequests } from "@/lib/rail/impersonate";
 import { resolveRichId, searchProforma } from "@/lib/rail/proforma";
 import { rankResults } from "@/lib/domain/ranking";
 import { buildResult, isOriginalKind, type PriceHow, type SearchResult } from "@/lib/domain/result";
@@ -198,6 +199,8 @@ export async function runSearch(params: SearchParams, opts: RunOptions): Promise
   let dbUsed = 0; // total DB network calls this search (resolves + price checks)
   let pricedVias = 0; // priced candidates this search (what dbBudget limits)
   const startDailyUsed = dbUsageToday();
+  const startRefused = refusedRequests();
+  let timetableGap = false;
   const onDbUse = () => {
     dbUsed++;
     addDbUsageToday(1);
@@ -324,6 +327,8 @@ export async function runSearch(params: SearchParams, opts: RunOptions): Promise
       bestPrice: prices.length ? Math.min(...prices) : null,
       anchorPrice,
       dailyCapReached: startDailyUsed + dbUsed >= DB_DAILY_CAP,
+      dbRefused: refusedRequests() - startRefused,
+      timetableGap,
       priceableRemaining: [...collected.values()].filter(
         (r) =>
           r.coverage.price == null &&
@@ -478,6 +483,11 @@ export async function runSearch(params: SearchParams, opts: RunOptions): Promise
       }
     };
 
+    // Where DB is asked from: normally the profile's first stop. Right after the new timetable
+    // is loaded DB knows the trains but not yet local stops (tram / bus) – then it answers
+    // with no connection at all, and the profile's next stop (e.g. the Hbf) is used instead.
+    let dbFrom: { variant: "primary" | "fallback"; label: string } = { variant: "primary", label: primaryOrigin.label };
+    let dbFromSwitched = false;
     const ensureDbEndpoints = async (): Promise<boolean> => {
       if (dbOrigin === undefined) dbOrigin = await resolveDb(primaryOrigin.name);
       if (dbDest === undefined) dbDest = await resolveDb(dest.name);
@@ -501,9 +511,21 @@ export async function runSearch(params: SearchParams, opts: RunOptions): Promise
         });
         for (const j of res.journeys) {
           setAnchor(j.price?.amount);
-          ingest(j, "primary", primaryOrigin.label, "candidate", expected, "normal", "plain");
+          ingest(j, dbFrom.variant, dbFrom.label, "candidate", expected, "normal", "plain");
         }
         dlog("search", `normal journeys: ${res.journeys.length}, reference≈${anchorPrice ?? "–"}€`);
+        const fb = originEndpoints[1];
+        if (!res.journeys.length && !dbFromSwitched && fb && params.filters.useFallback) {
+          dbFromSwitched = true;
+          const fbId = await resolveDb(fb.name);
+          if (fbId && fbId !== dbOrigin) {
+            dbOrigin = fbId;
+            dbFrom = { variant: "fallback", label: fb.label };
+            dlog("search", `DB: no connection from ${primaryOrigin.label} – asking from ${fb.label}`);
+            emit({ type: "status", message: `DB kennt ab ${primaryOrigin.label} noch keine Verbindung – suche ab ${fb.label} …`, meta: meta() });
+            return priceNormalOnly();
+          }
+        }
       } catch (err) {
         if (err instanceof ProviderError && (err.isBlocked || err.status === 503)) {
           emit({ type: "status", message: "DB-Preisquelle nicht erreichbar – Fahrplan wird angezeigt.", meta: meta() });
@@ -539,7 +561,7 @@ export async function runSearch(params: SearchParams, opts: RunOptions): Promise
         });
         // Low-FV connections are bookable DB journeys, but from a constructed
         // search (ICE excluded) — no "Pro-Forma" badge, yet not a DB original.
-        for (const j of res.journeys) ingest(j, "primary", primaryOrigin.label, "candidate", expected, "alternative", "lowfv");
+        for (const j of res.journeys) ingest(j, dbFrom.variant, dbFrom.label, "candidate", expected, "alternative", "lowfv");
         dlog("search", `low-FV journeys: ${res.journeys.length}`);
       } catch {
         /* best effort */
@@ -618,7 +640,7 @@ export async function runSearch(params: SearchParams, opts: RunOptions): Promise
               if (!j.legs.some((l) => !l.isWalking && isLongDistanceProduct(l.product))) continue;
               // Via-forced routing → bookable DB connection, but not what DB
               // proposes for a plain search: no badge, not "original".
-              ingest(j, "primary", primaryOrigin.label, "candidate", expected, "alternative", "via");
+              ingest(j, dbFrom.variant, dbFrom.label, "candidate", expected, "alternative", "via");
               const p = j.price?.amount;
               if (typeof p === "number") {
                 observedPrice = observedPrice == null ? p : Math.min(observedPrice, p);
@@ -706,7 +728,7 @@ export async function runSearch(params: SearchParams, opts: RunOptions): Promise
             });
             for (const j of js) {
               if (!j.legs.some((l) => !l.isWalking && isLongDistanceProduct(l.product))) continue;
-              ingest(j, "primary", primaryOrigin.label, "candidate", expected, "proforma", "proforma");
+              ingest(j, dbFrom.variant, dbFrom.label, "candidate", expected, "proforma", "proforma");
             }
           } catch {
             /* best effort — Akamai/422 handled in the provider */
@@ -781,7 +803,7 @@ export async function runSearch(params: SearchParams, opts: RunOptions): Promise
           });
           for (const j of js) {
             if (!j.legs.some((l) => !l.isWalking && isLongDistanceProduct(l.product))) continue;
-            ingest(j, "primary", primaryOrigin.label, "candidate", expected, "proforma", "proforma");
+            ingest(j, dbFrom.variant, dbFrom.label, "candidate", expected, "proforma", "proforma");
           }
         } catch {
           /* best effort */
@@ -848,6 +870,9 @@ export async function runSearch(params: SearchParams, opts: RunOptions): Promise
       });
       for (const j of primaryJourneys) ingest(j, "primary", primaryOrigin.label, "live");
       dlog("search", `baseline: ${primaryJourneys.length} journeys from ${primaryOrigin.label}`);
+      // no regional train at all → the open timetable doesn't cover the day yet (new timetable year)
+      const hasRegional = (js: NormJourney[]) => js.some((j) => j.legs.some((l) => /^(regional|regionalExpress|suburban)$/.test(l.product ?? "")));
+      if (routing.name === "motis") timetableGap = !hasRegional(primaryJourneys);
       emit({ type: "results", results: snapshot(), meta: meta() });
 
       const primaryUsable = [...collected.values()].some((r) => r.variant === "primary");
@@ -872,6 +897,7 @@ export async function runSearch(params: SearchParams, opts: RunOptions): Promise
           signal,
         });
         for (const j of fbJourneys) ingest(j, "fallback", fb.label, "live");
+        if (timetableGap) timetableGap = !hasRegional(fbJourneys);
         emit({ type: "results", results: snapshot(), meta: meta() });
       }
     }
@@ -931,7 +957,9 @@ export async function runSearch(params: SearchParams, opts: RunOptions): Promise
             ? [departure, new Date(departure.getTime() + 3 * 3600_000)]
             : [departure];
       const jobs: { via: string; when: Date }[] = [];
-      for (const when of slots) for (const e of edges) jobs.push({ via: e.fromLocationId!, when });
+      // only stops MOTIS knows (feed-prefixed ids); edges learned from DB carry bare DB numbers
+      const motisEdges = routing.name === "motis" ? edges.filter((e) => e.fromLocationId?.includes("_")) : edges;
+      for (const when of slots) for (const e of motisEdges) jobs.push({ via: e.fromLocationId!, when });
       candidatesTotal = Math.max(0, Math.min(jobs.length, motisBudget - motisUsed));
       if (candidatesTotal > 0) {
         emit({ type: "status", message: `Suche ${candidatesTotal} Fernverkehrs-Kombinationen (MOTIS) …`, meta: meta() });

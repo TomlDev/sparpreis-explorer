@@ -483,6 +483,18 @@ function Home() {
   // Status / hint notices — shown floating on the right (desktop) or inline (mobile).
   const infoNotices = (
     <>
+      {(state.meta?.dbRefused ?? 0) > 0 && (
+        <div className="rounded-xl border border-danger/40 bg-danger/5 p-3 text-sm">
+          <b>Die DB hat {state.meta!.dbRefused} Abfragen abgelehnt</b> (Bot-Schutz, HTTP 403) – Verbindungen und Preise fehlen
+          deshalb. Das ist kein Filter-Problem; später noch einmal suchen.
+        </div>
+      )}
+      {state.meta?.timetableGap && (
+        <div className="rounded-xl border border-warning/40 bg-warning/5 p-3 text-sm">
+          <b>Für diesen Tag fehlt der offene Fahrplan noch</b> (meist nach dem Fahrplanwechsel Mitte Dezember). Gesucht wird nur
+          mit den Verbindungen der DB – Umwege über andere Knoten fehlen, es werden deutlich weniger Treffer.
+        </div>
+      )}
       {(state.cached || (!state.results.length && teaser)) && sorted.length > 0 && (
         <div className="rounded-lg border border-border bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
           Gespeicherte Ergebnisse – Preise werden ggf. aktualisiert …

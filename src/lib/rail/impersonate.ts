@@ -128,11 +128,14 @@ export function queryString(query: Record<string, unknown> | null | undefined): 
 /**
  * Browser fingerprints we present, in order of preference. DB's bot protection
  * now and then starts refusing one with HTTP 403 (Oct 2026: Chrome — Safari and
- * Firefox went through): then the next one is used and kept.
+ * Firefox went through; Nov 2026: all three — only Safari 26.0.1 went through):
+ * then the next one is used and kept.
  */
-const TARGETS = [...new Set([process.env.DB_IMPERSONATE_TARGET, "safari260", "firefox147", "chrome"].filter((t): t is string => !!t))];
-const g = globalThis as { __impTarget?: number };
+const TARGETS = [...new Set([process.env.DB_IMPERSONATE_TARGET, "safari2601", "safari260", "firefox147", "chrome"].filter((t): t is string => !!t))];
+const g = globalThis as { __impTarget?: number; __impRefused?: number };
 export const impersonateTarget = () => TARGETS[g.__impTarget ?? 0];
+/** DB requests refused with 403 even after trying every fingerprint (since start) — a search shows it. */
+export const refusedRequests = () => g.__impRefused ?? 0;
 function nextTarget(failed: string): boolean {
   const i = TARGETS.indexOf(failed);
   if (i < 0 || i + 1 >= TARGETS.length) return false;
@@ -178,6 +181,7 @@ export function makeImpersonatingRequest(fixed?: string) {
       throw new Error(`impersonate transport error: ${res.error || "unknown"}`);
     }
     if (res.status < 200 || res.status >= 300) {
+      if (res.status === 403) g.__impRefused = refusedRequests() + 1;
       if (process.env.DEBUG_DB_BODY) console.error(`[db-body] ${res.status} ${url}\n${(res.body || "").slice(0, 800)}`);
       const err = new Error(`HTTP ${res.status}`) as Error & { statusCode?: number };
       err.statusCode = res.status;
