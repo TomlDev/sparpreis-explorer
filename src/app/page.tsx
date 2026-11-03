@@ -16,12 +16,12 @@ import { Button, Card, Chip, Input, ProgressBar, Spinner, Switch } from "@/compo
 import { useSearch } from "@/hooks/useSearch";
 import type { SearchResult } from "@/lib/domain/result";
 import { SORT_LABELS, type SortMode } from "@/lib/domain/ranking";
-import type { SearchFilters } from "@/lib/engine/types";
+import { activeFilters, LIMIT_KEYS, type SearchFilters } from "@/lib/engine/types";
 import { formatAgo, formatDateHuman, formatTime, todayLocal, windowToHHmm } from "@/lib/time";
 import { TimeRange } from "@/components/TimeRange";
 import { parseView, serializeView } from "@/lib/viewState";
-import { clientFilter, clientSort, filterReason, refLeadKeysFor, timeFilterWindow } from "@/lib/viewFilter";
-import { formatEuro } from "@/lib/utils";
+import { clientFilter, clientSort, filterReason, reasonFilterKey, refLeadKeysFor, timeFilterWindow } from "@/lib/viewFilter";
+import { cn, formatEuro } from "@/lib/utils";
 
 interface Endpoint {
   key: string;
@@ -67,7 +67,28 @@ function Home() {
   const [timeMode, setTimeMode] = React.useState<"departure" | "arrival">(initialView.timeMode);
   const [mode, setMode] = React.useState<"fast" | "thorough" | "deep">(initialView.mode);
   const [sort, setSort] = React.useState<SortMode>(initialView.sort);
-  const [filters, setFilters] = React.useState<SearchFilters>(initialView.filters);
+  const [filters, setFiltersRaw] = React.useState<SearchFilters>(initialView.filters);
+  // Filters switched off for a moment — their values stay, "all" = everything at once.
+  const [off, setOff] = React.useState<string[]>(initialView.off);
+  // what is applied (search + list): switched-off limits count as "no limit"
+  const active = React.useMemo(() => activeFilters(filters, off), [filters, off]);
+  // typing a new value into a switched-off limit switches it back on
+  const setFilters = React.useCallback(
+    (next: SearchFilters) => {
+      setFiltersRaw((prev) => {
+        const changed = Object.keys(next).filter((k) => next[k as keyof SearchFilters] !== prev[k as keyof SearchFilters]);
+        if (changed.length) setOff((o) => (o.includes("all") ? o : o.filter((k) => !changed.includes(k))));
+        return next;
+      });
+    },
+    [],
+  );
+  const toggleOff = (key: string, isOff: boolean) =>
+    setOff((o) => {
+      // all off and one switched back on → the others stay off
+      const list = o.includes("all") ? [...LIMIT_KEYS, "belowReference", "onlyOriginal"] : o;
+      return isOff ? [...new Set([...list, key])] : list.filter((k) => k !== key);
+    });
   // Whole-day scan: cheapest connection with one Fernverkehr leg and a high Flex chance.
   const [dayScan, setDayScan] = React.useState(initialView.day);
   // Results grouped by price — the default for the day scan, a toggle next to the sorting.
@@ -153,7 +174,8 @@ function Home() {
         setTimeMode(v.timeMode);
         setMode(v.mode);
         setSort(v.sort);
-        setFilters(v.filters);
+        setFiltersRaw(v.filters);
+        setOff(v.off);
         setDayScan(v.day);
         setGrouped(v.grouped ?? v.day);
       }
@@ -190,7 +212,7 @@ function Home() {
       timeMode,
       mode,
       sort,
-      filters,
+      filters: active,
       restoreOnly: true,
     });
     setExpanded(false);
@@ -232,9 +254,9 @@ function Home() {
       timeTo,
       timeMode,
       sort,
-      filters,
+      filters: active,
     }),
-    [origin, dest, timeWindow, timeTo, timeMode, sort, filters],
+    [origin, dest, timeWindow, timeTo, timeMode, sort, active],
   );
 
   function submit(e?: React.FormEvent) {
@@ -325,27 +347,29 @@ function Home() {
       clientSort(
         clientFilter(
           displayResults,
-          filters,
+          active,
           referencePrice,
           refLeadKeys,
           dayScan ? null : timeFilterWindow(timeWindow, timeTo, timeMode),
         ),
         sort,
       ),
-    [displayResults, filters, sort, referencePrice, refLeadKeys, timeWindow, timeTo, timeMode, dayScan],
+    [displayResults, active, sort, referencePrice, refLeadKeys, timeWindow, timeTo, timeMode, dayScan],
   );
 
   // What the filters hide right now — results "vanish" while searching when they get a price
   // (then the unpriced go), turn out to be a partial ticket, or cross a limit.
   const hiddenSummary = React.useMemo(() => {
     const ctx = {
-      filters,
+      filters: active,
       reference: referencePrice,
       refLeadKeys,
       window: dayScan ? null : timeFilterWindow(timeWindow, timeTo, timeMode),
       anyPriced: displayResults.some((r) => r.coverage.price != null),
     };
+    // per label: how many, and which filter it is (null: not a filter you can switch off)
     const counts = new Map<string, number>();
+    const keys = new Map<string, string | null>();
     for (const r of displayResults) {
       const why = filterReason(r, ctx);
       if (!why) continue;
@@ -357,9 +381,10 @@ function Home() {
             ? "Ticket deckt nicht die ganze Strecke"
             : why.split(" (")[0];
       counts.set(label, (counts.get(label) ?? 0) + 1);
+      keys.set(label, reasonFilterKey(why));
     }
-    return [...counts.entries()].sort((a, b) => b[1] - a[1]);
-  }, [displayResults, filters, referencePrice, refLeadKeys, dayScan, timeWindow, timeTo, timeMode]);
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([label, n]) => ({ label, n, key: keys.get(label) ?? null }));
+  }, [displayResults, active, referencePrice, refLeadKeys, dayScan, timeWindow, timeTo, timeMode]);
 
   const renderCard = (r: SearchResult) => (
     <ResultCard
@@ -400,6 +425,7 @@ function Home() {
     mode,
     sort,
     filters,
+    off,
     refFp: referenceFp,
     refPrice: referencePrice,
     open: [...openCards],
@@ -483,6 +509,24 @@ function Home() {
   // Status / hint notices — shown floating on the right (desktop) or inline (mobile).
   const infoNotices = (
     <>
+      {off.length > 0 && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-primary/40 bg-primary/5 p-3 text-sm">
+          <span className="min-w-0 flex-1">
+            {off.includes("all") ? (
+              <>
+                <b>Filter aus</b> – gezeigt wird alles mit durchgehendem Ticket.
+              </>
+            ) : (
+              <>
+                <b>{off.length === 1 ? "1 Filter aus" : `${off.length} Filter aus`}:</b> {off.map((k) => OFF_LABELS[k] ?? k).join(", ")}
+              </>
+            )}
+          </span>
+          <Button size="sm" variant="outline" onClick={() => setOff([])}>
+            Wieder an
+          </Button>
+        </div>
+      )}
       {(state.meta?.dbRefused ?? 0) > 0 && (
         <div className="rounded-xl border border-danger/40 bg-danger/5 p-3 text-sm">
           <b>Die DB hat {state.meta!.dbRefused} Abfragen abgelehnt</b> (Bot-Schutz, HTTP 403) – Verbindungen und Preise fehlen
@@ -560,9 +604,23 @@ function Home() {
                     </p>
                     {/* set before starting: they also decide which candidates get a price check */}
                     <div className="grid grid-cols-3 gap-2 pb-2">
-                      <DayNum label="Min. Flex" suffix="%" value={filters.minFlexPct} onChange={(v) => setFilters({ ...filters, minFlexPct: v })} />
-                      <DayNum label="Max. Anschluss" suffix="%" value={filters.maxOkPct} onChange={(v) => setFilters({ ...filters, maxOkPct: v })} />
-                      <DayNum label="Max. Preis" suffix="€" value={filters.maxPrice} onChange={(v) => setFilters({ ...filters, maxPrice: v })} />
+                      {(
+                        [
+                          ["minFlexPct", "Min. Flex", "%"],
+                          ["maxOkPct", "Max. Anschluss", "%"],
+                          ["maxPrice", "Max. Preis", "€"],
+                        ] as const
+                      ).map(([k, label, suffix]) => (
+                        <DayNum
+                          key={k}
+                          label={label}
+                          suffix={suffix}
+                          value={filters[k]}
+                          onChange={(v) => setFilters({ ...filters, [k]: v })}
+                          off={off.includes("all") || off.includes(k)}
+                          onOff={(o) => toggleOff(k, o)}
+                        />
+                      ))}
                     </div>
                   </>
                 )}
@@ -810,12 +868,32 @@ function Home() {
             sorted.map((r) => renderCard(r))
           )}
           {hiddenSummary.length > 0 && (
-            <p className="px-1 pt-1 text-xs text-muted-foreground">
-              {hiddenSummary.reduce((n, [, c]) => n + c, 0)} ausgeblendet: {hiddenSummary.map(([l, c]) => `${c} ${l}`).join(" · ")}{" "}
-              <button type="button" className="text-primary underline" onClick={() => setFiltersOpen(true)}>
-                Filter
-              </button>
-            </p>
+            <div className="px-1 pt-1 text-xs text-muted-foreground">
+              <span>{hiddenSummary.reduce((n, h) => n + h.n, 0)} ausgeblendet:</span>{" "}
+              {hiddenSummary.map((h, i) => (
+                <React.Fragment key={h.label}>
+                  {i > 0 && " · "}
+                  {h.key ? (
+                    // tap = switch exactly this filter off
+                    <button type="button" className="underline decoration-dotted underline-offset-2 hover:text-foreground" title="Diesen Filter ausschalten" onClick={() => toggleOff(h.key!, true)}>
+                      {h.n} {h.label} ✕
+                    </button>
+                  ) : (
+                    `${h.n} ${h.label}`
+                  )}
+                </React.Fragment>
+              ))}
+              <span className="mt-1.5 flex flex-wrap gap-2">
+                {hiddenSummary.some((h) => h.key) && (
+                  <Button size="sm" variant="outline" onClick={() => setOff(["all"])}>
+                    Alle Filter kurz aus
+                  </Button>
+                )}
+                <Button size="sm" variant="ghost" onClick={() => setFiltersOpen(true)}>
+                  Filter …
+                </Button>
+              </span>
+            </div>
           )}
           {sorted.some((r) => r.reliability) && (
             <p className="px-1 pt-2 text-[11px] text-muted-foreground">Anschluss / Flex: {RELIABILITY_NOTE}</p>
@@ -883,6 +961,8 @@ function Home() {
           {displayResults.length > 0 && (
             <div className="flex flex-col gap-1 rounded-2xl border border-border bg-card/95 p-3 shadow-lg backdrop-blur">
               <span className="px-1 pb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Filter</span>
+              <Switch label="Alle kurz aus" checked={off.includes("all")} onChange={(v) => setOff(v ? ["all"] : [])} />
+              <div className="my-1 h-px bg-border" />
               <Switch
                 label="Nur Original (DB)"
                 checked={filters.onlyOriginal}
@@ -966,7 +1046,15 @@ function Home() {
         {infoNotices}
       </div>
 
-      <FiltersSheet open={filtersOpen} onClose={() => setFiltersOpen(false)} filters={filters} onChange={setFilters} />
+      <FiltersSheet
+        open={filtersOpen}
+        onClose={() => setFiltersOpen(false)}
+        filters={filters}
+        onChange={setFilters}
+        off={off}
+        onOff={toggleOff}
+        onAllOff={(o) => setOff(o ? ["all"] : [])}
+      />
       <CompareView open={compareOpen} onClose={() => setCompareOpen(false)} results={compareResults} />
       <Sheet open={calendarOpen} onClose={() => setCalendarOpen(false)} title="Woche vergleichen">
         {origin && dest ? (
@@ -1019,12 +1107,52 @@ function EndpointSelect({
   );
 }
 
+/** Names of the filters that can be switched off (banner "… aus"). */
+const OFF_LABELS: Record<string, string> = {
+  maxPrice: "Max. Preis",
+  minFlexPct: "Min. Flex",
+  maxOkPct: "Max. Anschluss",
+  maxFvLegs: "Fernverkehrs-Abschnitte",
+  maxDurationMin: "Max. Dauer",
+  maxTransfers: "Max. Umstiege",
+  maxFvMinutes: "ICE-Minuten",
+  maxFvStops: "ICE-Halte",
+  minTransferMin: "Mindestumstieg",
+  belowReference: "Nur günstigere",
+  onlyOriginal: "Nur Original",
+};
+
 /** Small number field in the day-scan box (empty = no limit). */
-function DayNum({ label, suffix, value, onChange }: { label: string; suffix: string; value: number | null; onChange: (v: number | null) => void }) {
+function DayNum({
+  label,
+  suffix,
+  value,
+  onChange,
+  off,
+  onOff,
+}: {
+  label: string;
+  suffix: string;
+  value: number | null;
+  onChange: (v: number | null) => void;
+  /** switched off for now (value kept) */
+  off: boolean;
+  onOff: (off: boolean) => void;
+}) {
   return (
-    <label className="flex min-w-0 flex-col gap-0.5">
-      <span className="truncate text-[11px] text-muted-foreground">{label}</span>
-      <span className="flex items-center gap-1">
+    <div className="flex min-w-0 flex-col gap-0.5">
+      <label className="flex min-w-0 items-center gap-1 text-[11px] text-muted-foreground">
+        <input
+          type="checkbox"
+          className="h-3.5 w-3.5 shrink-0 accent-[hsl(var(--primary))]"
+          checked={value != null && !off}
+          disabled={value == null}
+          onChange={(e) => onOff(!e.target.checked)}
+          aria-label={`${label} an/aus`}
+        />
+        <span className={cn("truncate", off && "line-through")}>{label}</span>
+      </label>
+      <span className={cn("flex items-center gap-1", off && "opacity-50")}>
         <Input
           type="number"
           inputMode="decimal"
@@ -1036,6 +1164,6 @@ function DayNum({ label, suffix, value, onChange }: { label: string; suffix: str
         />
         <span className="text-xs text-muted-foreground">{suffix}</span>
       </span>
-    </label>
+    </div>
   );
 }

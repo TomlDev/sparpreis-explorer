@@ -12,6 +12,7 @@ import { SORT_LABELS } from "@/lib/domain/ranking";
 import type { SearchResult } from "@/lib/domain/result";
 import { walkWait } from "@/lib/domain/transferWait";
 import {
+  activeFilters,
   DEFAULT_FILTERS,
   type SearchEvent,
   type SearchFilters,
@@ -92,19 +93,20 @@ async function main(): Promise<void> {
     },
   );
 
-  const serverSet = applyFilters(union, view.filters); // what the browser received
+  const active = activeFilters(view.filters, view.off); // switched-off filters count as none
+  const serverSet = applyFilters(union, active); // what the browser received
   const reference = view.refFp
     ? (serverSet.find((r) => r.fingerprint === view.refFp) ?? null)
     : null;
   const refLeadKeys = refLeadKeysFor(reference);
   const timeWin = view.day ? null : timeFilterWindow(view.timeFrom, view.timeTo, view.timeMode);
   const visible = clientSort(
-    clientFilter(serverSet, view.filters, view.refPrice, refLeadKeys, timeWin),
+    clientFilter(serverSet, active, view.refPrice, refLeadKeys, timeWin),
     view.sort,
   );
   const visibleFps = new Set(visible.map((r) => r.fingerprint));
   const ctx = {
-    filters: view.filters,
+    filters: active,
     reference: view.refPrice,
     refLeadKeys,
     window: timeWin,
@@ -128,7 +130,7 @@ async function main(): Promise<void> {
     Object.keys(DEFAULT_FILTERS) as (keyof SearchFilters)[]
   )
     .filter((k) => view.filters[k] !== DEFAULT_FILTERS[k])
-    .map((k) => `${k}=${String(view.filters[k] ?? "–")}`);
+    .map((k) => `${k}=${String(view.filters[k] ?? "–")}${view.off.includes("all") || view.off.includes(k) ? " (aus)" : ""}`);
 
   if (flags.has("--json")) {
     const row = (r: SearchResult) => ({

@@ -14,6 +14,7 @@ describe("Ansicht in der URL", () => {
       mode: "deep",
       sort: "tight-transfers",
       filters: { ...DEFAULT_FILTERS, onlyOriginal: true, belowReference: false, maxPrice: 40, maxFvLegs: null },
+      off: ["maxPrice", "minFlexPct"],
       refFp: "6f4394c563dfb9e52f957d98",
       refPrice: 63.04,
       open: ["6f4394c563dfb9e52f957d98", "a03f1cf5a39f679212b7c48d"],

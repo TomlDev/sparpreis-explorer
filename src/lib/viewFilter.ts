@@ -138,6 +138,25 @@ export function filterReason(r: SearchResult, ctx: FilterContext): string | null
   return null;
 }
 
+/** Which filter a reason from filterReason comes from (to switch exactly that one off), or
+ *  null for what isn't a filter you set (time window, reference trains, no ticket …). */
+export function reasonFilterKey(why: string): string | null {
+  const rules: [RegExp, string][] = [
+    [/^Preis über Max/, "maxPrice"],
+    [/^Dauer über Max/, "maxDurationMin"],
+    [/^zu viele Umstiege/, "maxTransfers"],
+    [/^zu viele ICE-Minuten/, "maxFvMinutes"],
+    [/^zu viele ICE-Halte/, "maxFvStops"],
+    [/^zu viele FV-Abschnitte/, "maxFvLegs"],
+    [/^Umstieg zu knapp/, "minTransferMin"],
+    [/Flex/, "minFlexPct"],
+    [/Anschluss/, "maxOkPct"],
+    [/^nicht günstiger als Referenz/, "belowReference"],
+    [/^nur Original/, "onlyOriginal"],
+  ];
+  return rules.find(([re]) => re.test(why))?.[1] ?? null;
+}
+
 /** Client-side filter mirroring (and extending) the server's applyFilters, so
  *  filter changes apply instantly to the already-fetched results. */
 export function clientFilter(

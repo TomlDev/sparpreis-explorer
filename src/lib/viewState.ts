@@ -1,5 +1,5 @@
 import type { SortMode } from "@/lib/domain/ranking";
-import { DEFAULT_FILTERS, type SearchFilters } from "@/lib/engine/types";
+import { DEFAULT_FILTERS, LIMIT_KEYS, type SearchFilters } from "@/lib/engine/types";
 import { WINDOW_LABELS, windowToHHmm } from "@/lib/time";
 
 /**
@@ -17,6 +17,7 @@ import { WINDOW_LABELS, windowToHHmm } from "@/lib/time";
  *   sort            ranking mode                      (default cheapest)
  *   f.<filter>      a filter that differs from DEFAULT_FILTERS
  *                   (booleans 1/0, numbers, empty = no limit)
+ *   off             filters switched off for now, value kept (comma-separated keys, or "all")
  *   ref, refp       chosen reference (fingerprint) and its price
  *   open            expanded result cards (comma-separated fingerprints)
  *   cmp             compare selection (comma-separated fingerprints)
@@ -38,6 +39,8 @@ export interface ViewState {
   mode: SearchModeKey;
   sort: SortMode;
   filters: SearchFilters;
+  /** Filters switched off for the moment (their values stay in `filters`). */
+  off: string[];
   refFp: string | null;
   refPrice: number | null;
   open: string[];
@@ -59,6 +62,7 @@ export const DEFAULT_VIEW: ViewState = {
   mode: "thorough",
   sort: "cheapest",
   filters: DEFAULT_FILTERS,
+  off: [],
   refFp: null,
   refPrice: null,
   open: [],
@@ -80,6 +84,7 @@ const SORTS: SortMode[] = [
 ];
 const MODES: SearchModeKey[] = ["fast", "thorough", "deep"];
 const DIALOGS: ViewDialog[] = ["filters", "calendar", "compare"];
+const OFF_KEYS: string[] = [...LIMIT_KEYS, "belowReference", "onlyOriginal"];
 const HHMM = /^\d{1,2}:\d{2}$/;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const FP = /^[0-9a-f]{6,40}$/i;
@@ -148,6 +153,7 @@ export function parseView(input: URLSearchParams | string): ViewState {
     mode: mode && MODES.includes(mode) ? mode : DEFAULT_VIEW.mode,
     sort: sort && SORTS.includes(sort) ? sort : DEFAULT_VIEW.sort,
     filters,
+    off: [...new Set((q.get("off") ?? "").split(",").filter((k) => k === "all" || OFF_KEYS.includes(k)))],
     refFp: refFp && FP.test(refFp) ? refFp : null,
     refPrice: refPrice != null && refPrice !== "" && Number.isFinite(Number(refPrice)) ? Number(refPrice) : null,
     open: fpList(q.get("open")),
@@ -173,6 +179,7 @@ export function serializeView(v: ViewState): string {
   for (const key of Object.keys(DEFAULT_FILTERS) as (keyof SearchFilters)[]) {
     if (v.filters[key] !== DEFAULT_FILTERS[key]) q.set(`f.${key}`, encodeFilterValue(v.filters[key]));
   }
+  if (v.off.length) q.set("off", v.off.includes("all") ? "all" : [...v.off].sort().join(","));
   if (v.refFp) q.set("ref", v.refFp);
   if (v.refFp && v.refPrice != null) q.set("refp", String(v.refPrice));
   if (v.open.length) q.set("open", v.open.join(","));

@@ -46,6 +46,33 @@ export const DEFAULT_FILTERS: SearchFilters = {
   maxOkPct: null,
 };
 
+/** Limits that can be switched off for a moment without losing the value typed in. */
+export const LIMIT_KEYS = [
+  "maxPrice",
+  "minFlexPct",
+  "maxOkPct",
+  "maxFvLegs",
+  "maxDurationMin",
+  "maxTransfers",
+  "maxFvMinutes",
+  "maxFvStops",
+  "minTransferMin",
+] as const;
+export type LimitKey = (typeof LIMIT_KEYS)[number];
+/** Switched-off filters: limit keys, "belowReference" / "onlyOriginal", or "all" (everything at once). */
+export type FilterOff = string[];
+
+/** The filters actually applied: switched-off limits count as "no limit", switched-off
+ *  switches as off. "all" = show everything except what never makes sense (no ticket, no FV). */
+export function activeFilters(f: SearchFilters, off: FilterOff): SearchFilters {
+  if (!off.length) return f;
+  const all = off.includes("all");
+  const out = { ...f } as Record<string, unknown>;
+  for (const k of LIMIT_KEYS) if (all || off.includes(k)) out[k] = k === "maxFvLegs" ? 0 : null;
+  for (const k of ["belowReference", "onlyOriginal"]) if (all || off.includes(k)) out[k] = false;
+  return out as unknown as SearchFilters;
+}
+
 export interface SearchParams {
   /** Profile keys (preferred) — resolve to primary + fallback stations. */
   originKey?: string;

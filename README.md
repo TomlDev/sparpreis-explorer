@@ -152,6 +152,10 @@ Gebucht ist ein günstiges Ticket mit hoher Flex-Chance, jetzt zählt der Tag se
   und Gültigkeit wieder als offen zurück.
 - **Filter und Sortierung:** Preis, Dauer, Umstiege, ICE-Anteil, Fernverkehrs-Abschnitte,
   Flex-Chance, Anschluss-Quote, Ankunfts- statt Abfahrtszeit und mehr.
+- **Filter kurz ausschalten:** Jeder Grenzwert hat einen Haken – weg damit, und der Filter
+  wirkt nicht mehr, der Wert bleibt aber stehen. „Alle Filter kurz aus“ zeigt alles mit
+  durchgehendem Ticket; unter der Liste lässt sich jeder Grund („3 Flex-Chance zu niedrig ✕“)
+  direkt antippen, um genau diesen Filter auszuschalten.
 - **Ehrlich, wenn Daten fehlen:** Blockt die DB Abfragen (Bot-Schutz) oder hat der offene
   Fahrplan einen Tag noch nicht (nach dem Fahrplanwechsel im Dezember), sagt die Suche das,
   statt einfach wenig zu finden. Kennt die DB einen Start-Halt im neuen Fahrplan noch nicht,
