@@ -16,6 +16,8 @@ interface View {
   /** address DB answers online claims at (claimant data) — and whether a mailbox here reads it */
   claimEmail: string | null;
   claimEmailRead: boolean;
+  /** the user confirmed the claim address is forwarded to a mailbox read here */
+  claimEmailForwarded: boolean;
 }
 type Call = (action: string, extra?: Record<string, unknown>) => Promise<(View & { folders?: string[] }) | null>;
 
@@ -90,8 +92,20 @@ export function MailSyncCard() {
       {!v.claimEmailRead && v.claimEmail && (
         <p className="mb-3 rounded-xl border border-warning/40 bg-warning/10 p-2.5 text-sm">
           Online eingereichte Fahrgastrechte-Anträge nennen <b>{v.claimEmail}</b> – dorthin schickt die DB ihre Bescheide. Dieses
-          Postfach liest die App nicht: unten als weiteres Postfach eintragen (oder dorthin weiterleiten), sonst fehlen
-          die Antworten.
+          Postfach liest die App nicht: dorthin weiterleiten (z. B. den Alias beim Mailanbieter) oder unten als weiteres
+          Postfach eintragen, sonst fehlen die Antworten.
+          <label className="mt-2 flex items-center gap-2">
+            <input type="checkbox" className="h-4 w-4" disabled={!!busy} onChange={() => call("claimForwarded", { value: true })} />
+            Wird an ein Postfach hier weitergeleitet
+          </label>
+        </p>
+      )}
+      {v.claimEmailForwarded && v.claimEmail && (
+        <p className="mb-3 text-xs text-muted-foreground">
+          Bescheide an {v.claimEmail} kommen per Weiterleitung an.{" "}
+          <button type="button" className="underline" disabled={!!busy} onClick={() => call("claimForwarded", { value: false })}>
+            Stimmt nicht mehr
+          </button>
         </p>
       )}
       <div className="space-y-4">

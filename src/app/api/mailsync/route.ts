@@ -12,7 +12,11 @@ import {
   setMailConfig,
   syncMail,
 } from "@/lib/trips/mailSync";
+import { getSetting, setSetting } from "@/lib/repo/settings";
 import { getProfile } from "@/lib/trips/profile";
+
+/** The claim address the user said is forwarded to a mailbox read here (alias, redirect). */
+const FORWARDED = "mail:claimEmailForwarded";
 
 export const runtime = "nodejs";
 
@@ -26,7 +30,9 @@ function view() {
   // DB answers online claims at the e-mail address given there — is that mailbox read?
   const claimEmail = getProfile().email.trim().toLowerCase() || null;
   const read = accounts.filter((a) => a.config.host && a.hasPassword).map((a) => a.config.user.trim().toLowerCase());
-  return { accounts, claimEmail, claimEmailRead: !claimEmail || read.includes(claimEmail) };
+  // only for the address it was confirmed for: a new address asks again
+  const forwarded = !!claimEmail && getSetting<string>(FORWARDED) === claimEmail;
+  return { accounts, claimEmail, claimEmailForwarded: forwarded, claimEmailRead: !claimEmail || read.includes(claimEmail) || forwarded };
 }
 
 export async function GET() {
@@ -65,6 +71,9 @@ export async function POST(req: Request) {
       case "rescan":
         resetMailSeen(acc);
         await syncMail(acc);
+        return NextResponse.json(view());
+      case "claimForwarded":
+        setSetting(FORWARDED, b.value === true ? getProfile().email.trim().toLowerCase() || null : null);
         return NextResponse.json(view());
       case "forget":
         forgetMailAccount(acc);

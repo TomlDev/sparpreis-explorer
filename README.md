@@ -175,7 +175,8 @@ Gebucht ist ein günstiges Ticket mit hoher Flex-Chance, jetzt zählt der Tag se
 - **Mehrere Postfächer:** Die App liest beliebig viele IMAP-Postfächer (je eins mit eigenem
   Ordner und Stand) – z. B. das, an das deine Buchungsmails gehen, und die Adresse, die in
   online eingereichten Fahrgastrechte-Anträgen steht. Wird diese Antwort-Adresse von keinem
-  Postfach gelesen, warnen die Einstellungen, damit kein Bescheid verloren geht.
+  Postfach gelesen, warnen die Einstellungen, damit kein Bescheid verloren geht – ist sie nur ein
+  Alias, den du an ein gelesenes Postfach weiterleitest, genügt ein Haken („wird weitergeleitet“).
 - **Änderungsmails der DB:** „Fahrplanänderung …“, „Geänderte Fahrtzeiten …“ und „Mehrere
   Änderungen …“ landen an der passenden Fahrt – mit jeder einzelnen Änderung (neue Abfahrt,
   anderer Zug, anderes Gleis) und dem Hinweis, wenn die DB die Zugbindung aufhebt.
