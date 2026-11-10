@@ -70,6 +70,36 @@ Auftragsnummer: 300000000001`);
     expect(getTrip(trip.id)!.events).toHaveLength(1);
   });
 
+  it("erkennt „Mehrere Änderungen …“ samt Zugwechsel und Gleisen", () => {
+    const trip = createTrip({
+      orderNumber: "300000000012",
+      direction: "outbound",
+      legs: [{ fromName: "Bochum Hbf", toName: "Triberg", plannedDeparture: "2026-11-24T04:34:00.000Z", plannedArrival: "2026-11-24T10:42:00.000Z" }],
+    });
+    const c = parseScheduleChange(
+      "Mehrere Änderungen für Ihre Reise nach Triberg am 24. Nov. 2026",
+      `Mehrere Änderungen Guten Morgen Max Mustermann, es gibt mehrere Änderungen für Ihre Reise von Bochum Hbf nach Triberg am 24. Nov. 2026:
+       Ihre neue Abfahrtszeit mit RE2 in Bochum Hbf ist 05:09 Uhr statt 05:34 Uhr. Grund dafür ist eine Fahrplanänderung.
+       Wir setzen abweichend den Zug RE2 von Bochum Hbf nach Essen Hbf ein. Grund dafür ist eine Fahrplanänderung.
+       Ihr Zug RE2 fährt abweichend von Gleis 5 in Bochum Hbf ab. Grund dafür ist eine Fahrplanänderung.
+       Ihr Zug ICE 101 kommt abweichend an Gleis 6 in Köln Hbf an. Grund dafür ist eine Fahrplanänderung.
+       Hinweise zur Zugbindung Die Zugbindung ist für Ihre Fahrt aufgehoben. Auftragsnummer: 300000000012`,
+    )!;
+    expect(c).toMatchObject({ orderNumber: "300000000012", date: "2026-11-24", from: "Bochum Hbf", to: "Triberg", zugbindungLifted: true });
+    expect(c.details).toEqual([
+      "Ihre neue Abfahrtszeit mit RE2 in Bochum Hbf ist 05:09 Uhr statt 05:34 Uhr.",
+      "Wir setzen abweichend den Zug RE2 von Bochum Hbf nach Essen Hbf ein.",
+      "Ihr Zug RE2 fährt abweichend von Gleis 5 in Bochum Hbf ab.",
+      "Ihr Zug ICE 101 kommt abweichend an Gleis 6 in Köln Hbf an.",
+    ]);
+    const t = applyScheduleChange(c, new Date("2026-11-10T08:15:13Z"))!;
+    expect(t.id).toBe(trip.id);
+    expect(t.ticket?.scheduleChange).toMatchObject({ zugbindungLifted: true });
+    expect(t.ticket?.scheduleChange?.details).toHaveLength(4);
+    expect(t.ticket?.scheduleChange?.text).toMatch(/Zugbindung aufgehoben.*05:09 Uhr statt 05:34 Uhr/);
+    expect(parseScheduleChange("Buchungsbestätigung Deutsche Bahn (Auftrag: 300000000012)", "Auftragsnummer: 300000000012")).toBeNull();
+  });
+
   it("liest Gutscheine", () => {
     expect(
       parseVoucher("Fwd: Ihr Gutschein der Deutschen Bahn (Auftrag: 300000000003)", "Gutscheinnummer: ABCDEFG Gutscheinwert: 9,30 EUR Gültig bis: 27.11.2030"),

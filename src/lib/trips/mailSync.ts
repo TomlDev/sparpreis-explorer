@@ -120,7 +120,7 @@ export async function listFolders(cfg = getMailConfig()): Promise<string[]> {
 
 const MAX_MAIL_BYTES = 10 * 1024 * 1024;
 const DB_SENDER = /@(?:[\w.-]+\.)?(deutschebahn\.com|bahn\.de)>?$/i;
-const DB_SUBJECT = /Buchungsbest[äa]tigung|Reservierungsbest[äa]tigung|Deutsche Bahn|Fahrgastrechte|Fahrplan(ä|ae)nderung|Auftrag:?\s*\d{6,}/i;
+const DB_SUBJECT = /Buchungsbest[äa]tigung|Reservierungsbest[äa]tigung|Deutsche Bahn|Fahrgastrechte|Fahrplan(ä|ae)nderung|(Ä|ä)nderung(en)? für Ihre Reise|Auftrag:?\s*\d{6,}/i;
 const DB_PARTS = /BAHN_\d{4}-\d{2}-\d{2}|Ticket_\d{6,}|(Auszahlung|Ablehnung)-\d{2}V\d+|message\/rfc822/i;
 
 /** A DB booking — sent by DB itself, or forwarded (e.g. by a GMX filter rule),

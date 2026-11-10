@@ -172,6 +172,9 @@ Gebucht ist ein günstiges Ticket mit hoher Flex-Chance, jetzt zählt der Tag se
 - **Kalender mit all deinen Fahrten:** aus der Suche per „Gebucht“, von Hand, automatisch aus
   den Buchungsmails (IMAP) oder aus deinem **DB-Kundenkonto** (inklusive Preis je Richtung
   bei Hin- und Rückfahrt).
+- **Änderungsmails der DB:** „Fahrplanänderung …“, „Geänderte Fahrtzeiten …“ und „Mehrere
+  Änderungen …“ landen an der passenden Fahrt – mit jeder einzelnen Änderung (neue Abfahrt,
+  anderer Zug, anderes Gleis) und dem Hinweis, wenn die DB die Zugbindung aufhebt.
 - **Echte Zeiten jeder Fahrt:** Die App verfolgt deine Züge am Reisetag live (alle 10 min
   und genau zur Abfahrt und Ankunft) und ergänzt später die offiziellen Ist-Zeiten aus den
   Open Data. Selbst gemessene Werte bleiben immer erhalten, auch wenn die DB ihre Daten

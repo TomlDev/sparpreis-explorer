@@ -217,6 +217,13 @@ export default function TripPage() {
               {t.ticket.scheduleChange.zugbindungLifted
                 ? "Zugbindung aufgehoben – du darfst jeden Zug zu deinem Ziel nehmen, auch früher oder auf anderer Route."
                 : "bitte die Verbindung prüfen."}
+              {!!t.ticket.scheduleChange.details?.length && (
+                <ul className="mt-1 list-disc space-y-0.5 pl-5">
+                  {t.ticket.scheduleChange.details.map((d) => (
+                    <li key={d}>{d}</li>
+                  ))}
+                </ul>
+              )}
             </div>
           )}
           <TicketPanel t={t} tickets={tickets} cover={cover} onSave={patch} />

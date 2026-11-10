@@ -617,7 +617,7 @@ export interface TicketInfo {
   reservationOnly?: boolean;
   reservationPrice?: number | null;
   /** DB announced a schedule change and lifted the Zugbindung. */
-  scheduleChange?: { notifiedAt: string; zugbindungLifted: boolean; text: string } | null;
+  scheduleChange?: { notifiedAt: string; zugbindungLifted: boolean; text: string; details?: string[] } | null;
   /** Round trip: price of THIS direction (DB lists Hin-/Rückfahrt separately in the account). */
   directionPrice?: number | null;
 }

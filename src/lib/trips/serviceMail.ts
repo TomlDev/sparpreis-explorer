@@ -7,8 +7,9 @@ import { inferVoucherUse, type VoucherBooking, type VoucherQuestion } from "./vo
 
 /**
  * Other DB service mails:
- *  - "Fahrplanänderung für Ihre Reise nach … am 09. Okt. 2026": attached to
- *    the trip (order number + day) incl. whether DB lifted the Zugbindung.
+ *  - "Fahrplanänderung für Ihre Reise nach … am 09. Okt. 2026" (also
+ *    "Mehrere Änderungen …", "Geänderte Fahrtzeiten …"): attached to the trip
+ *    (order number + day) incl. what changed and whether DB lifted the Zugbindung.
  *  - "Ihr Gutschein der Deutschen Bahn": (remaining-value) vouchers, kept in
  *    a small wallet.
  */
@@ -39,17 +40,24 @@ export interface ScheduleChange {
   from: string | null;
   to: string | null;
   zugbindungLifted: boolean;
-  /** What changed ("Ihre neue Abfahrtszeit … ist 11:35 Uhr statt 11:34 Uhr."). */
+  /** What changed ("Ihre neue Abfahrtszeit … ist 11:35 Uhr statt 11:34 Uhr.", other train, other platform). */
   details?: string[];
 }
 
+/** Subjects of DB's change notices for a booked journey. */
+export const SCHEDULE_CHANGE_SUBJECT = /Fahrplan(?:ä|ae)nderung|Ge(?:ä|ae)nderte Fahrtzeiten|(?:Ä|Ae|ä|ae)nderung(?:en)? f(?:ü|ue)r Ihre Reise/i;
+
+/** One sentence per change, "Grund dafür ist …" left out. */
+const CHANGE_LINE =
+  /Ihre neue (?:Abfahrts|Ankunfts)zeit[^.]{1,200}?statt \d{1,2}:\d{2} Uhr\.|Wir setzen abweichend [^.]{1,200}?ein\.|Ihr Zug [^.]{1,120}? (?:fährt|kommt) abweichend [^.]{1,160}?(?:ab|an)\.|Ihr Zug [^.]{1,160}? f(?:ällt|ährt) [^.]{0,80}?aus\./g;
+
 export function parseScheduleChange(subject: string, text: string): ScheduleChange | null {
-  if (!/Fahrplan(ä|ae)nderung|Ge(ä|ae)nderte Fahrtzeiten/i.test(subject)) return null;
+  if (!SCHEDULE_CHANGE_SUBJECT.test(subject)) return null;
   const t = text.replace(/\s+/g, " ").slice(0, 50_000);
   const orderNumber = /Auftragsnummer:?\s*(\d{6,})/.exec(t)?.[1] ?? null;
   if (!orderNumber) return null; // can't be matched to a trip ever
   const route = /Reise von (.{1,150}?) nach (.{1,150}?)\s*am (\d{1,2}\.\s*\S{3,10}\s+\d{4})/.exec(t);
-  const details = [...t.matchAll(/Ihre neue (?:Abfahrts|Ankunfts)zeit[^.]{1,200}?statt \d{1,2}:\d{2} Uhr\./g)].map((m) => m[0]).slice(0, 6);
+  const details = [...new Set([...t.matchAll(CHANGE_LINE)].map((m) => m[0]))].slice(0, 10);
   return {
     orderNumber,
     date: germanDate(route?.[3] ?? subject),
@@ -69,11 +77,15 @@ export function applyScheduleChange(c: ScheduleChange, notifiedAt: Date): TripRo
     .get();
   if (!trip) return null;
   const iso = notifiedAt.toISOString();
-  const text = c.zugbindungLifted
-    ? "Fahrplanänderung – laut DB ist die Zugbindung aufgehoben (jeder Zug zum Ziel erlaubt)."
-    : c.details?.length
-      ? `Geänderte Fahrtzeiten: ${c.details.join(" ")}`
-      : "Fahrplanänderung gemeldet – bitte Verbindung prüfen.";
+  const details = c.details ?? [];
+  const text = [
+    c.zugbindungLifted
+      ? "Fahrplanänderung – laut DB ist die Zugbindung aufgehoben (jeder Zug zum Ziel erlaubt)."
+      : details.length
+        ? "Geänderte Fahrtzeiten:"
+        : "Fahrplanänderung gemeldet – bitte Verbindung prüfen.",
+    ...details,
+  ].join(" ");
   // Same notice again (re-import, re-sync) → nothing to do.
   const known = db
     .select()
@@ -87,7 +99,7 @@ export function applyScheduleChange(c: ScheduleChange, notifiedAt: Date): TripRo
   return updateTrip(trip.id, {
     ticket: {
       ...(trip.ticket ?? {}),
-      scheduleChange: { notifiedAt: iso, zugbindungLifted: c.zugbindungLifted || !!cur?.zugbindungLifted, text },
+      scheduleChange: { notifiedAt: iso, zugbindungLifted: c.zugbindungLifted || !!cur?.zugbindungLifted, text, details },
     },
   });
 }
