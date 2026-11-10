@@ -291,7 +291,7 @@ export function reminders(today = todayLocal()): Reminder[] {
       title: `Fahrgastrechte${claim.caseId ? ` ${claim.caseId}` : ""}: noch keine Antwort`,
       detail: `Eingereicht am ${new Date(claim.submittedAt).toLocaleDateString("de-DE", { timeZone: "Europe/Berlin" })} (${trip.originName} → ${trip.destName}, Fahrt vom ${trip.date.split("-").reverse().join(".")}). Die DB antwortet meist innerhalb eines Monats – sonst beim Servicecenter nachfragen.`,
       kind: "claim",
-      href: `/reisen/${trip.id}`,
+      href: `/reisen/${trip.id}#fahrgastrechte`,
     });
   }
   // Open tickets (Zugbindung lifted, not travelled yet): usable up to a year after the travel day.

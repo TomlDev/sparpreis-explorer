@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { ensureReady } from "@/lib/bootstrap";
+import { tripIdsByOrder } from "@/lib/trips/repo";
 import { addVoucher, applyVoucherUse, deleteVoucher, getVouchers, updateVoucher } from "@/lib/trips/serviceMail";
 
 export const runtime = "nodejs";
@@ -8,7 +9,10 @@ export const runtime = "nodejs";
 export async function GET() {
   ensureReady();
   const questions = applyVoucherUse();
-  return NextResponse.json({ vouchers: getVouchers(), questions });
+  const vouchers = getVouchers();
+  // order number → trip, so "Rest aus Auftrag …" / "eingesetzt für Auftrag …" link to the trip
+  const trips = tripIdsByOrder([...vouchers.flatMap((v) => [v.orderNumber, v.usedOrder]), ...questions.map((q) => q.orderNumber)]);
+  return NextResponse.json({ vouchers, questions, trips });
 }
 
 /** add | update (value, valid until, redeemed) | delete | used (paid for an order) | notUsed | resolve (none of them) */

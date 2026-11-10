@@ -15,7 +15,7 @@ import {
   savePoints,
   updateBahnCard,
 } from "@/lib/trips/loyalty";
-import { createTrip, getTrip, openTickets, updateTrip } from "@/lib/trips/repo";
+import { claimBriefs, createTrip, getTrip, listTrips, openTickets, saveClaim, tripIdsByOrder, updateTrip } from "@/lib/trips/repo";
 import { addVoucher, deleteVoucher, getVouchers, inOneYear, updateVoucher } from "@/lib/trips/serviceMail";
 
 beforeAll(() => ensureReady());
@@ -163,5 +163,20 @@ describe("BahnCard, BahnBonus, Aktionen", () => {
     expect(ids).not.toContain(future);
     expect(getTrip(spare)!.events.at(-1)?.text).toMatch(/Ticket offen/);
     expect(reminders().some((r) => r.id === `lifted-${spare}`)).toBe(true);
+  });
+
+  it("verknüpft Antrag, Hin-/Rückfahrt und Auftragsnummer mit der Fahrt", () => {
+    const leg = (d: string) => [{ fromName: "Bochum Hbf", toName: "Triberg", plannedDeparture: `${d}T05:00:00.000Z`, plannedArrival: `${d}T11:00:00.000Z` }];
+    const out = createTrip({ orderNumber: "300000000031", direction: "outbound", legs: leg("2020-05-04") });
+    const back = createTrip({ orderNumber: "300000000031", direction: "return", legs: leg("2020-05-07") });
+    saveClaim(out.id, { type: "delay", status: "draft", amount: 5 });
+    saveClaim(out.id, { type: "delay", status: "submitted", amount: 11.2, caseId: "26V00000031" });
+    // the sent claim wins over the draft
+    expect(claimBriefs([out.id]).get(out.id)).toMatchObject({ status: "submitted", amount: 11.2, caseId: "26V00000031" });
+    expect(listTrips("2020-05-04", "2020-05-07").find((t) => t.id === out.id)?.claim?.status).toBe("submitted");
+    expect(listTrips("2020-05-04", "2020-05-07").find((t) => t.id === back.id)?.claim).toBeNull();
+    expect(getTrip(out.id)!.sameOrder.map((t) => t.id)).toEqual([back.id]);
+    expect(getTrip(back.id)!.sameOrder.map((t) => t.direction)).toEqual(["outbound"]);
+    expect(tripIdsByOrder(["300000000031", null, "999"])).toEqual({ "300000000031": out.id });
   });
 });

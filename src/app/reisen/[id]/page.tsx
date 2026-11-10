@@ -24,7 +24,10 @@ type Detail = TripRow & {
   claims: ClaimRow[];
   movedTo: (TripRef & { status: string }) | null;
   movedFromTrip: (TripRef & { expectedDelayMin: number | null }) | null;
+  sameOrder: (TripRef & { direction: string | null; status: string })[];
 };
+type VoucherBrief = { number: string; value: number; orderNumber: string | null; usedOrder?: string | null };
+type TripVouchers = { paidWith: VoucherBrief[]; issued: VoucherBrief[] };
 
 const EVENT_LABEL: Record<string, string> = {
   control: "Kontrolliert",
@@ -52,6 +55,7 @@ export default function TripPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const [t, setT] = React.useState<Detail | null>(null);
+  const [vouchers, setVouchers] = React.useState<TripVouchers | null>(null);
   const [msg, setMsg] = React.useState<{ text: string; ok: boolean } | null>(null);
   const [busy, setBusy] = React.useState<string | null>(null);
   const fileRef = React.useRef<HTMLInputElement>(null);
@@ -64,8 +68,10 @@ export default function TripPage() {
     try {
       const res = await fetch(`/api/trips/${id}`);
       if (res.ok) {
-        const trip = (await res.json()).trip as Detail;
+        const d = await res.json();
+        const trip = d.trip as Detail;
         setT(trip);
+        setVouchers(d.vouchers ?? null);
         setLoadError(null);
         fetch(`/api/trips?from=${trip.date}&to=${trip.date}`)
           .then((r) => (r.ok ? r.json() : { trips: [] }))
@@ -209,7 +215,9 @@ export default function TripPage() {
               {STATUS[t.status]?.label ?? t.status}
             </span>
           </div>
+          <ClaimChip claims={t.claims} />
           <MovedBanner t={t} />
+          <BookingLinks t={t} vouchers={vouchers} />
           <PlanRow t={t} plan={plan} rivals={rivals} onSave={patch} />
           {t.ticket?.scheduleChange && (
             <div className="mt-2 rounded-xl border border-warning/40 bg-warning/10 p-2.5 text-sm">
@@ -382,7 +390,7 @@ export default function TripPage() {
               return ok;
             }}
           />
-          <div className="mt-4 border-t border-border pt-3">
+          <div id="fahrgastrechte" className="mt-4 scroll-mt-20 border-t border-border pt-3">
             <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Fahrgastrechte</h3>
           {t.status === "lifted" ? (
             <div className="space-y-1 text-sm">
@@ -1111,6 +1119,20 @@ function TicketPanel({
  * "Was ist passiert?" and the passenger rights in one card. Folded (one line)
  * when there is nothing to do: still to come, or settled (claim sent / nothing due).
  */
+/** Collapsed "Was ist passiert?": the claim in one line — state, amount, since when, case id. */
+function claimSummary(claims: ClaimRow[]): string {
+  const c = claims.find((x) => x.status === "paid") ?? claims.find((x) => x.status === "rejected") ?? claims.find((x) => x.status === "submitted");
+  if (!c) return "";
+  const day = (ms: number | null) => (ms ? new Date(ms).toLocaleDateString("de-DE", { timeZone: "Europe/Berlin" }) : null);
+  const parts =
+    c.status === "paid"
+      ? [`Antrag ausgezahlt${c.paidAmount != null ? ` ${formatEuro(c.paidAmount)}` : ""}`, day(c.paidAt) && `am ${day(c.paidAt)}`]
+      : c.status === "rejected"
+        ? ["Antrag abgelehnt", day(c.decidedAt) && `am ${day(c.decidedAt)}`]
+        : [`Antrag eingereicht${c.amount != null ? ` (${formatEuro(c.amount)})` : ""}`, day(c.submittedAt) && `am ${day(c.submittedAt)}`, "noch keine Antwort"];
+  return [...parts, c.caseId].filter(Boolean).join(" · ");
+}
+
 function OutcomeCard({ t, ent, children }: { t: Detail; ent: ReturnType<typeof assess>; children: React.ReactNode }) {
   const past = !!t.plannedDeparture && new Date(t.plannedDeparture).getTime() < Date.now();
   const sent = t.claims.some((c) => c.status === "submitted" || c.status === "paid" || c.status === "rejected");
@@ -1123,7 +1145,7 @@ function OutcomeCard({ t, ent, children }: { t: Detail; ent: ReturnType<typeof a
       : [
           STATUS[t.status]?.label ?? t.status,
           sent
-            ? `Antrag ${t.claims.find((c) => c.status === "paid") ? "ausgezahlt" : t.claims.find((c) => c.status === "rejected") ? "abgelehnt" : "eingereicht"}`
+            ? claimSummary(t.claims)
             : ent?.payable && ent.amount != null
               ? `${formatEuro(ent.amount)} möglich`
               : null,
@@ -1131,17 +1153,90 @@ function OutcomeCard({ t, ent, children }: { t: Detail; ent: ReturnType<typeof a
           .filter(Boolean)
           .join(" · ");
   const [open, setOpen] = React.useState(() => !(settled || (t.status === "planned" && !past)));
+  // "#fahrgastrechte" (header chip, reminders, claims list) opens it and scrolls there
+  React.useEffect(() => {
+    const go = () => {
+      if (window.location.hash !== "#fahrgastrechte") return;
+      setOpen(true);
+      // after the card has rendered its content: jump to the claim part, not the form above it
+      setTimeout(() => document.getElementById("fahrgastrechte")?.scrollIntoView({ block: "start", behavior: "smooth" }), 80);
+    };
+    go();
+    window.addEventListener("hashchange", go);
+    return () => window.removeEventListener("hashchange", go);
+  }, []);
   return (
     <Card className="p-3 sm:p-4">
       <button type="button" onClick={() => setOpen((o) => !o)} className="flex w-full items-center gap-2 text-left" aria-expanded={open}>
         <span className="min-w-0 flex-1">
           <span className="block text-sm font-semibold uppercase tracking-wide text-muted-foreground">Was ist passiert?</span>
-          {!open && <span className="block truncate text-xs text-muted-foreground">{summary}</span>}
+          {!open && <span className="line-clamp-2 block text-xs text-muted-foreground">{summary}</span>}
         </span>
         <ChevronDown className={cn("h-4 w-4 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")} />
       </button>
       {open && <div className="mt-3">{children}</div>}
     </Card>
+  );
+}
+
+/** Passenger-rights state right in the header — taps through to the claim below. */
+function ClaimChip({ claims }: { claims: ClaimRow[] }) {
+  const rank: Record<string, number> = { paid: 0, rejected: 1, submitted: 2, draft: 3 };
+  const c = [...claims].sort((a, b) => (rank[a.status] ?? 9) - (rank[b.status] ?? 9))[0];
+  if (!c) return null;
+  const text =
+    c.status === "paid"
+      ? `${c.paidAmount != null ? formatEuro(c.paidAmount) : "Antrag"} erstattet`
+      : c.status === "rejected"
+        ? "Antrag abgelehnt"
+        : c.status === "submitted"
+          ? `Antrag offen${c.amount != null ? ` · ${formatEuro(c.amount)}` : ""}`
+          : "Antrag nicht eingereicht";
+  return (
+    <a
+      href="#fahrgastrechte"
+      className={cn(
+        "mt-2 inline-block rounded-full px-2.5 py-1 text-xs font-medium underline-offset-2 hover:underline",
+        c.status === "paid" ? "bg-success/15 text-success" : c.status === "rejected" ? "bg-danger/10 text-danger" : c.status === "submitted" ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground",
+      )}
+      title={c.caseId ? `Fall-ID ${c.caseId}` : undefined}
+    >
+      {text}
+      {c.caseId ? ` · ${c.caseId}` : ""} ›
+    </a>
+  );
+}
+
+/** Same booking, other direction (round trip) and the vouchers of this order. */
+function BookingLinks({ t, vouchers }: { t: Detail; vouchers: TripVouchers | null }) {
+  const paid = vouchers?.paidWith ?? [];
+  const issued = vouchers?.issued ?? [];
+  if (!t.sameOrder.length && !paid.length && !issued.length) return null;
+  const dir = (d: string | null) => (d === "return" ? "Rückfahrt" : d === "outbound" ? "Hinfahrt" : "Fahrt");
+  const short = (d: string) => new Date(`${d}T12:00:00Z`).toLocaleDateString("de-DE", { weekday: "short", day: "numeric", month: "numeric" });
+  return (
+    <div className="mt-2 space-y-1 text-sm">
+      {t.sameOrder.map((o) => (
+        <Link key={o.id} href={`/reisen/${o.id}`} className="block text-primary underline-offset-2 hover:underline">
+          {o.date < t.date ? "← " : ""}
+          {dir(o.direction)} am {short(o.date)}
+          {o.plannedDeparture ? ` ${formatTime(o.plannedDeparture)}` : ""}
+          {o.date >= t.date ? " →" : ""}
+          <span className="ml-1 text-xs text-muted-foreground">· gleicher Auftrag{o.status !== "planned" ? ` · ${STATUS[o.status]?.label ?? o.status}` : ""}</span>
+        </Link>
+      ))}
+      {paid.map((v) => (
+        <Link key={`p-${v.number}`} href="/reisen#gutscheine" className="block text-muted-foreground hover:text-foreground">
+          💳 Bezahlt mit Gutschein <span className="font-mono">{v.number}</span>
+          {v.value != null ? ` (${formatEuro(v.value)})` : ""}
+        </Link>
+      ))}
+      {issued.map((v) => (
+        <Link key={`i-${v.number}`} href="/reisen#gutscheine" className="block text-muted-foreground hover:text-foreground">
+          🎟 Restgutschein <span className="font-mono">{v.number}</span> über {formatEuro(v.value)} erhalten
+        </Link>
+      ))}
+    </div>
   );
 }
 

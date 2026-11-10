@@ -9,6 +9,7 @@ import { Button, Card, Input, Spinner } from "@/components/ui";
 import { BahnCards, CalendarSubscribe, Promos, Reminders, useAccount } from "@/components/trips/AccountPanel";
 import { STATUS, legColor, legLabel } from "@/components/trips/tripUi";
 import type { TripRow } from "@/db/schema";
+import type { ClaimBrief } from "@/lib/trips/repo";
 import { planStates, type PlanInfo } from "@/lib/trips/plan";
 import { liftedUsableUntil } from "@/lib/trips/rules";
 import { berlinToIso, formatTime } from "@/lib/time";
@@ -286,7 +287,15 @@ async function setPlan(id: string, plan: "take" | "skip" | null) {
   await fetch(`/api/trips/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ plan }) }).catch(() => {});
 }
 
-function TripCard({ t, plan, onChanged }: { t: TripRow; plan?: PlanInfo; onChanged?: () => void }) {
+/** Passenger-rights state on a trip card: "Antrag offen 11,20 €" / "44,24 € erstattet" / "Antrag abgelehnt". */
+function claimChip(c: ClaimBrief): { text: string; cls: string } {
+  if (c.status === "paid") return { text: `${c.paidAmount != null ? formatEuro(c.paidAmount) : "Antrag"} erstattet`, cls: "bg-success/15 text-success" };
+  if (c.status === "rejected") return { text: "Antrag abgelehnt", cls: "bg-danger/10 text-danger" };
+  if (c.status === "submitted") return { text: `Antrag offen${c.amount != null ? ` ${formatEuro(c.amount)}` : ""}`, cls: "bg-primary/15 text-primary" };
+  return { text: "Antrag nicht eingereicht", cls: "bg-muted text-muted-foreground" };
+}
+
+function TripCard({ t, plan, onChanged }: { t: TripRow & { claim?: ClaimBrief | null }; plan?: PlanInfo; onChanged?: () => void }) {
   const state = t.status === "planned" ? (plan?.state ?? null) : null;
   return (
     <Link href={`/reisen/${t.id}`} className="block">
@@ -315,8 +324,13 @@ function TripCard({ t, plan, onChanged }: { t: TripRow; plan?: PlanInfo; onChang
                   {legLabel(l)}
                 </span>
               ))}
-            {t.ticket?.scheduleChange?.zugbindungLifted && (
+            {t.ticket?.scheduleChange?.zugbindungLifted ? (
               <span className="rounded bg-warning/15 px-1.5 py-0.5 text-[10px] font-semibold text-warning">Zugbindung aufgehoben</span>
+            ) : t.ticket?.scheduleChange ? (
+              <span className="rounded bg-warning/15 px-1.5 py-0.5 text-[10px] font-semibold text-warning">Fahrplan geändert</span>
+            ) : null}
+            {t.claim && (
+              <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-semibold", claimChip(t.claim).cls)}>{claimChip(t.claim).text}</span>
             )}
             {t.movedFrom && <span className="rounded bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold text-primary">🔁 Ersatzfahrt</span>}
             {state === "take" && !plan?.implied && (
@@ -503,7 +517,7 @@ function ClaimsSummary() {
       {open && (
         <div className="mt-2 divide-y divide-border text-sm">
           {d.claims.map((c) => (
-            <Link key={c.id} href={`/reisen/${c.tripId}`} className="flex flex-wrap items-center gap-x-3 py-1.5 hover:bg-muted/40">
+            <Link key={c.id} href={`/reisen/${c.tripId}#fahrgastrechte`} className="flex flex-wrap items-center gap-x-3 py-1.5 hover:bg-muted/40">
               <span className="w-20 tabular-nums text-muted-foreground">{new Date(`${c.date}T12:00:00Z`).toLocaleDateString("de-DE")}</span>
               <span className="min-w-0 flex-1 truncate">{c.route}</span>
               <span
@@ -616,6 +630,8 @@ function Vouchers() {
   const [list, setList] = React.useState<Voucher[]>([]);
   // which voucher paid for which booking — the mails don't say (see lib/trips/voucherUse)
   const [questions, setQuestions] = React.useState<VoucherQuestion[]>([]);
+  // order number → trip (links "Rest aus Auftrag …" / "eingesetzt für Auftrag …")
+  const [tripOf, setTripOf] = React.useState<Record<string, string>>({});
   const [open, setOpen] = React.useState(false);
   // opened via "Verwalten" in the search's voucher card (runs before the page rewrites the URL)
   React.useEffect(() => {
@@ -632,6 +648,7 @@ function Vouchers() {
       .then((d) => {
         setList(d?.vouchers ?? []);
         setQuestions(d?.questions ?? []);
+        setTripOf(d?.trips ?? {});
         if (d?.questions?.length) setOpen(true);
         if (window.location.hash === "#gutscheine")
           requestAnimationFrame(() => document.getElementById("gutscheine")?.scrollIntoView({ block: "start" }));
@@ -662,6 +679,14 @@ function Vouchers() {
   const sum = openOnes.reduce((x, v) => x + (v.value ?? 0), 0);
   const typed = form.number.trim().toUpperCase().replace(/\s+/g, "");
   const known = typed.length >= 5 ? list.find((v) => v.number === typed) : undefined;
+  const orderLink = (o: string) =>
+    tripOf[o] ? (
+      <Link href={`/reisen/${tripOf[o]}`} className="text-primary underline">
+        {o}
+      </Link>
+    ) : (
+      o
+    );
   const row = (v: Voucher) => (
     <div key={v.number} className={cn("flex flex-wrap items-center gap-x-3 gap-y-1 py-1.5", v.redeemed && "opacity-50")}>
       <CopyCode code={v.number} />
@@ -683,8 +708,8 @@ function Vouchers() {
       €
       <span className="text-xs text-muted-foreground">
         {v.validUntil ? `gültig bis ${new Date(`${v.validUntil}T12:00:00Z`).toLocaleDateString("de-DE")}` : "Gültigkeit unbekannt"}
-        {v.orderNumber ? ` · Rest aus Auftrag ${v.orderNumber}` : ""}
-        {v.usedOrder ? ` · eingesetzt für Auftrag ${v.usedOrder}` : ""}
+        {v.orderNumber && <> · Rest aus Auftrag {orderLink(v.orderNumber)}</>}
+        {v.usedOrder && <> · eingesetzt für Auftrag {orderLink(v.usedOrder)}</>}
         {v.replacedBy ? ` · Rest jetzt in ${v.replacedBy}` : ""}
         {v.autoRedeemed ? " · automatisch erkannt" : ""}
       </span>
@@ -714,7 +739,7 @@ function Vouchers() {
               {q.kind === "which" ? (
                 <>
                   <p>
-                    Für die Buchung vom {deDate(q.date)} ({formatEuro(q.price)}, Auftrag {q.orderNumber}) kam ein Rest-Gutschein über{" "}
+                    Für die Buchung vom {deDate(q.date)} ({formatEuro(q.price)}, Auftrag {orderLink(q.orderNumber)}) kam ein Rest-Gutschein über{" "}
                     {formatEuro(q.restValue)}. Welcher Gutschein wurde eingesetzt?
                   </p>
                   <div className="mt-1.5 flex flex-wrap gap-1.5">
@@ -731,7 +756,7 @@ function Vouchers() {
               ) : (
                 <>
                   <p>
-                    Die Buchung vom {deDate(q.date)} (Auftrag {q.orderNumber}) kostete genau {formatEuro(q.price)} – so viel wie Gutschein{" "}
+                    Die Buchung vom {deDate(q.date)} (Auftrag {orderLink(q.orderNumber)}) kostete genau {formatEuro(q.price)} – so viel wie Gutschein{" "}
                     <span className="font-mono">{q.voucher}</span>. Damit bezahlt?
                   </p>
                   <div className="mt-1.5 flex flex-wrap gap-1.5">

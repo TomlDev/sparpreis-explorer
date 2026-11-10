@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { and, asc, desc, eq, gte, lt, lte } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNull, lt, lte, ne } from "drizzle-orm";
 import { db } from "@/db/client";
 import { carryRealtime } from "./realtime";
 import {
@@ -52,6 +52,46 @@ export interface TripDetail extends TripRow {
   movedTo: Pick<TripRow, "id" | "date" | "plannedDeparture" | "originName" | "destName" | "status"> | null;
   /** replacement journey: the booked trip whose ticket it uses */
   movedFromTrip: Pick<TripRow, "id" | "date" | "plannedDeparture" | "originName" | "destName" | "expectedDelayMin"> | null;
+  /** the other trips of the same booking (round trip: the other direction) */
+  sameOrder: Pick<TripRow, "id" | "date" | "plannedDeparture" | "originName" | "destName" | "direction" | "status">[];
+}
+
+/** The passenger-rights claim that tells a trip's state best (sent before drafts, newest first). */
+export interface ClaimBrief {
+  status: string;
+  amount: number | null;
+  paidAmount: number | null;
+  caseId: string | null;
+}
+const CLAIM_RANK: Record<string, number> = { paid: 0, rejected: 1, submitted: 2, draft: 3 };
+export function claimBriefs(tripIds: string[]): Map<string, ClaimBrief> {
+  const out = new Map<string, ClaimBrief>();
+  if (!tripIds.length) return out;
+  const rows = db.select().from(claims).where(inArray(claims.tripId, tripIds)).orderBy(desc(claims.createdAt)).all();
+  for (const c of rows) {
+    const cur = out.get(c.tripId);
+    if (cur && (CLAIM_RANK[cur.status] ?? 9) <= (CLAIM_RANK[c.status] ?? 9)) continue;
+    out.set(c.tripId, { status: c.status, amount: c.amount, paidAmount: c.paidAmount, caseId: c.caseId });
+  }
+  return out;
+}
+
+/** Order number → the trip of that booking to link to (outbound first, never a replacement journey). */
+export function tripIdsByOrder(orders: (string | null | undefined)[]): Record<string, string> {
+  const wanted = [...new Set(orders.filter((o): o is string => !!o))];
+  if (!wanted.length) return {};
+  const rows = db
+    .select({ id: trips.id, orderNumber: trips.orderNumber, direction: trips.direction, movedFrom: trips.movedFrom })
+    .from(trips)
+    .where(inArray(trips.orderNumber, wanted))
+    .all();
+  const out: Record<string, string> = {};
+  for (const o of wanted) {
+    const mine = rows.filter((r) => r.orderNumber === o && !r.movedFrom);
+    const pick = mine.find((r) => r.direction !== "return") ?? mine[0];
+    if (pick) out[o] = pick.id;
+  }
+  return out;
 }
 
 const rideLegs = (legs: TripLeg[]) => legs.filter((l) => !l.isWalking);
@@ -119,13 +159,15 @@ export function createTrip(input: TripInput): TripRow {
   return row;
 }
 
-export function listTrips(from: string, to: string): TripRow[] {
-  return db
+export function listTrips(from: string, to: string): (TripRow & { claim: ClaimBrief | null })[] {
+  const rows = db
     .select()
     .from(trips)
     .where(and(gte(trips.date, from), lte(trips.date, to)))
     .orderBy(asc(trips.date), asc(trips.plannedDeparture))
     .all();
+  const briefs = claimBriefs(rows.map((t) => t.id));
+  return rows.map((t) => ({ ...t, claim: briefs.get(t.id) ?? null }));
 }
 
 /**
@@ -173,6 +215,14 @@ export function getTrip(id: string): TripDetail | null {
           .where(eq(trips.id, t.movedFrom))
           .get() ?? null)
       : null,
+    sameOrder: t.orderNumber
+      ? db
+          .select({ id: trips.id, date: trips.date, plannedDeparture: trips.plannedDeparture, originName: trips.originName, destName: trips.destName, direction: trips.direction, status: trips.status })
+          .from(trips)
+          .where(and(eq(trips.orderNumber, t.orderNumber), ne(trips.id, id), isNull(trips.movedFrom)))
+          .orderBy(asc(trips.date), asc(trips.plannedDeparture))
+          .all()
+      : [],
   };
 }
 

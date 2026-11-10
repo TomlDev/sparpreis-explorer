@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { ensureReady } from "@/lib/bootstrap";
 import { deleteTrip, getTrip, updateTrip } from "@/lib/trips/repo";
+import { getVouchers } from "@/lib/trips/serviceMail";
 
 export const runtime = "nodejs";
 
@@ -9,7 +10,14 @@ type Ctx = { params: Promise<{ id: string }> };
 export async function GET(_req: Request, { params }: Ctx) {
   ensureReady();
   const trip = getTrip((await params).id);
-  return trip ? NextResponse.json({ trip }) : NextResponse.json({ error: "nicht gefunden" }, { status: 404 });
+  if (!trip) return NextResponse.json({ error: "nicht gefunden" }, { status: 404 });
+  // vouchers of this booking: the one(s) that paid for it, the rest voucher DB sent for it
+  const all = trip.orderNumber ? getVouchers() : [];
+  const vouchers = {
+    paidWith: all.filter((v) => v.usedOrder === trip.orderNumber),
+    issued: all.filter((v) => v.orderNumber === trip.orderNumber),
+  };
+  return NextResponse.json({ trip, vouchers });
 }
 
 export async function PATCH(req: Request, { params }: Ctx) {

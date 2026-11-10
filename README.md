@@ -211,6 +211,12 @@ Gebucht ist ein günstiges Ticket mit hoher Flex-Chance, jetzt zählt der Tag se
   erzeugt das **offizielle DB-Formular fertig ausgefüllt und unterschrieben** oder reicht den
   Antrag **direkt online über dein DB-Konto** ein. Name, Adresse, IBAN und Zugangsdaten liegen
   verschlüsselt auf dem Server.
+- **Alles verknüpft:** Auf jeder Fahrt steht oben der Stand des Antrags („Antrag offen ·
+  11,20 € · Fall-ID“, „44,24 € erstattet“, „abgelehnt“) – ein Tipp springt direkt zum Antrag;
+  dasselbe aus den Erinnerungen und der Fahrgastrechte-Liste. Die Reisen-Liste zeigt den
+  Antrag an jeder Fahrt, dazu „Fahrplan geändert“ bei jeder Änderungsmail. Hin- und Rückfahrt
+  eines Auftrags verlinken einander, die Fahrt nennt den Gutschein, mit dem sie bezahlt wurde,
+  und den Restgutschein daraus; in der Gutschein-Liste führen die Auftragsnummern zur Fahrt.
 - **Bescheide per Mail:** Eingangsbestätigung, Auszahlung und Ablehnung landen am Antrag –
   auch ein späterer Korrektur-Bescheid („nach erneuter Prüfung … angewiesen“) macht aus
   „abgelehnt“ wieder „ausgezahlt“.
