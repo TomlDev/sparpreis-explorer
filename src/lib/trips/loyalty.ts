@@ -7,6 +7,7 @@ import { todayLocal } from "@/lib/time";
 
 const berlinDay = (ms: number) => new Date(ms).toLocaleDateString("sv-SE", { timeZone: "Europe/Berlin" });
 import { liftedUsableUntil } from "./rules";
+import { openSkippedTickets } from "./repo";
 import { germanDate, getVouchers } from "./serviceMail";
 
 /**
@@ -294,6 +295,7 @@ export function reminders(today = todayLocal()): Reminder[] {
     });
   }
   // Open tickets (Zugbindung lifted, not travelled yet): usable up to a year after the travel day.
+  openSkippedTickets();
   for (const t of db.select().from(trips).where(eq(trips.status, "lifted")).all()) {
     const until = liftedUsableUntil(t.date);
     out.push({

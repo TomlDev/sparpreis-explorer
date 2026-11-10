@@ -15,7 +15,7 @@ import {
   savePoints,
   updateBahnCard,
 } from "@/lib/trips/loyalty";
-import { createTrip } from "@/lib/trips/repo";
+import { createTrip, getTrip, openTickets, updateTrip } from "@/lib/trips/repo";
 import { addVoucher, deleteVoucher, getVouchers, inOneYear, updateVoucher } from "@/lib/trips/serviceMail";
 
 beforeAll(() => ensureReady());
@@ -140,5 +140,28 @@ describe("BahnCard, BahnBonus, Aktionen", () => {
     const rotated = calendarToken(true);
     expect(rotated).not.toBe(t);
     expect(tokenOk(t)).toBe(false);
+  });
+
+  it("macht eine nicht genutzte Reserve-Buchung mit aufgehobener Zugbindung nach dem Reisetag zum offenen Ticket", () => {
+    const mk = (orderNumber: string, date: string, lifted: boolean, plan: "skip" | null) => {
+      const t = createTrip({
+        orderNumber,
+        direction: "outbound",
+        legs: [{ fromName: "Bochum Hbf", toName: "Triberg", plannedDeparture: `${date}T05:00:00.000Z`, plannedArrival: `${date}T11:00:00.000Z` }],
+      });
+      updateTrip(t.id, { plan, ticket: lifted ? { scheduleChange: { notifiedAt: "2020-01-01T00:00:00.000Z", zugbindungLifted: true, text: "x" } } : null });
+      return t.id;
+    };
+    const spare = mk("300000000021", "2020-03-02", true, "skip");
+    const taken = mk("300000000022", "2020-03-02", true, null); // not marked as spare → stays
+    const bound = mk("300000000023", "2020-03-02", false, "skip"); // Zugbindung not lifted → stays
+    const future = mk("300000000024", "2999-03-02", true, "skip"); // day not over yet
+    const ids = openTickets().map((t) => t.id);
+    expect(ids).toContain(spare);
+    expect(ids).not.toContain(taken);
+    expect(ids).not.toContain(bound);
+    expect(ids).not.toContain(future);
+    expect(getTrip(spare)!.events.at(-1)?.text).toMatch(/Ticket offen/);
+    expect(reminders().some((r) => r.id === `lifted-${spare}`)).toBe(true);
   });
 });

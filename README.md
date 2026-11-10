@@ -194,6 +194,9 @@ Gebucht ist ein günstiges Ticket mit hoher Flex-Chance, jetzt zählt der Tag se
 - **Offene Tickets auf einen Blick:** Unter „Reisen“ listet eine eigene Karte alle noch nicht
   genutzten Tickets aus allen Monaten – mit Wert, Fahrtdatum und „nutzbar bis“, das zuerst
   ablaufende oben.
+- **Reserve-Buchung wird von selbst zum offenen Ticket:** Steht an einer Fahrt „Nehme ich
+  nicht“ und hat die DB die Zugbindung aufgehoben (Änderungsmail oder DB-Konto), führt die
+  App sie nach dem Reisetag automatisch als „Ticket offen“ – mit Ablaufdatum und Erinnerung.
 - **Mit dem Ticket später gefahren:** Ab 20 min angekündigter Verspätung darfst du laut DB
   auch an einem anderen Tag fahren (bis zu einem Jahr später). Die gebuchte Fahrt wird dann
   mit der tatsächlich gemachten verknüpft; Entschädigung gibt es pro Ticket nur einmal, für
@@ -208,6 +211,9 @@ Gebucht ist ein günstiges Ticket mit hoher Flex-Chance, jetzt zählt der Tag se
   erzeugt das **offizielle DB-Formular fertig ausgefüllt und unterschrieben** oder reicht den
   Antrag **direkt online über dein DB-Konto** ein. Name, Adresse, IBAN und Zugangsdaten liegen
   verschlüsselt auf dem Server.
+- **Bescheide per Mail:** Eingangsbestätigung, Auszahlung und Ablehnung landen am Antrag –
+  auch ein späterer Korrektur-Bescheid („nach erneuter Prüfung … angewiesen“) macht aus
+  „abgelehnt“ wieder „ausgezahlt“.
 
 ## So benutzt du sie
 

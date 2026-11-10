@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { and, asc, desc, eq, gte, lte } from "drizzle-orm";
+import { and, asc, desc, eq, gte, lt, lte } from "drizzle-orm";
 import { db } from "@/db/client";
 import { carryRealtime } from "./realtime";
 import {
@@ -128,8 +128,28 @@ export function listTrips(from: string, to: string): TripRow[] {
     .all();
 }
 
+/**
+ * A spare booking ("Nehme ich nicht") whose Zugbindung DB lifted (change mail or
+ * the DB watch) becomes an open ticket once its day is over — usable for up to a
+ * year (liftedUsableUntil), so it shows up in "Offene Tickets" with a reminder.
+ */
+export function openSkippedTickets(today = formatInTimeZone(new Date(), TZ, "yyyy-MM-dd")): number {
+  const due = db
+    .select()
+    .from(trips)
+    .where(and(eq(trips.status, "planned"), eq(trips.plan, "skip"), lt(trips.date, today)))
+    .all()
+    .filter((t) => t.ticket?.scheduleChange?.zugbindungLifted || t.dbStatus?.zugbindung === "AUFGEHOBEN");
+  for (const t of due) {
+    updateTrip(t.id, { status: "lifted" });
+    addEvent(t.id, { type: "note", text: "Nicht gefahren, Zugbindung war aufgehoben → Ticket offen (bis zu einem Jahr nutzbar).", legIndex: null });
+  }
+  return due.length;
+}
+
 /** Trips not travelled whose ticket is still open (Zugbindung lifted), any date. */
 export function openTickets(): TripRow[] {
+  openSkippedTickets();
   return db.select().from(trips).where(eq(trips.status, "lifted")).orderBy(asc(trips.date), asc(trips.plannedDeparture)).all();
 }
 

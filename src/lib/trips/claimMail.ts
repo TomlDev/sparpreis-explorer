@@ -78,7 +78,8 @@ export function parseClaimDecision(text: string): ClaimDecision | null {
   const caseId = /Fall-ID\s+([A-Z0-9]{6,})/.exec(text)?.[1];
   if (!caseId) return null;
   const t = flat(text);
-  const amount = /den Betrag von ([\d.]+,\d{2}) Euro/.exec(t)?.[1];
+  // "den Betrag von 28,49 Euro …" / after a re-check: "einen Betrag in Höhe von 44,24 Euro …"
+  const amount = /(?:den|einen) Betrag (?:von|in Höhe von) ([\d.]+,\d{2}) Euro/.exec(t)?.[1];
   const route = /Fahrt von (.+?) nach (.+?) entschuldigen/.exec(t);
   const reason = /Gründe für unsere Entscheidung\.\s*(.+?)\s*Wenn Sie weitere Fragen/.exec(t)?.[1] ?? null;
   const items = [...(reason ?? "").matchAll(/\d+\.\s*([^:]{3,60}):/g)].map((m) => m[1].trim());
@@ -236,7 +237,9 @@ export function applyDecision(d: ClaimDecision, pdf?: { name: string; bytes: Buf
       .from(attachments)
       .where(and(eq(attachments.tripId, trip.id), eq(attachments.kind, "decision"), eq(attachments.size, pdf.bytes.length)))
       .get();
-    if (!have) saveAttachment(trip.id, { name: pdf.name, type: "application/pdf", bytes: pdf.bytes }, "decision", d.paid ? "Bescheid: Auszahlung" : "Bescheid: Ablehnung");
+    const caption = d.paid ? "Bescheid: Auszahlung" : "Bescheid: Ablehnung";
+    if (!have) saveAttachment(trip.id, { name: pdf.name, type: "application/pdf", bytes: pdf.bytes }, "decision", caption);
+    else if (have.caption !== caption) db.update(attachments).set({ caption }).where(eq(attachments.id, have.id)).run();
   }
   return { kind: "decision", caseId: d.caseId, claim, trip, tripCreated: !found.trip };
 }

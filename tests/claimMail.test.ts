@@ -123,4 +123,24 @@ describe("Fahrgastrechte-Post der DB", () => {
     expect(again.tripCreated).toBe(false);
     expect(again.claim.id).toBe(r.claim.id);
   });
+
+  it("macht aus der Ablehnung eine Auszahlung, wenn die DB nach erneuter Prüfung doch zahlt", () => {
+    const first = applyDecision(parseClaimDecision(REJECTED)!)!;
+    const recheck = `03.11.2026
+Ihr Anliegen vom 22.09.2026 | Fall-ID 26V00000002
+Auftragsnummer: 200000000002
+Ihre Reise am 19.09.2026
+Wir bedauern, dass uns bei der Bearbeitung Ihres Vorganges ein Fehler unterlaufen ist.
+Nach erneuter Prüfung des Sachverhaltes haben wir Ihnen im Auftrag der DB Fernverkehr AG am
+03.11.2026 einen Betrag in Höhe von 44,24 Euro auf das von Ihnen genannte Bankkonto angewiesen.
+1. BX0YKJLR Fahrtabbruch 44,24 Euro 0,00 Euro 44,24 Euro
+Gern erläutern wir Ihnen die Gründe für unsere Entscheidung.
+1. Fahrtabbruch:
+Auf Ihrer Fahrt hatten Sie eine Verspätung von mehr als 60 Minuten am Zielbahnhof zu erwarten.
+Wenn Sie weitere Fragen haben, rufen Sie uns bitte an.`;
+    expect(parseClaimDecision(recheck)).toMatchObject({ paid: true, amount: 44.24, decidedDate: "2026-11-03" });
+    const r = applyDecision(parseClaimDecision(recheck)!)!;
+    expect(r.claim.id).toBe(first.claim.id);
+    expect(r.claim).toMatchObject({ status: "paid", paidAmount: 44.24 });
+  });
 });
