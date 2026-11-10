@@ -30,19 +30,41 @@ export interface MailStatus {
   retries?: Record<string, number>;
 }
 
-const CFG = "mail:config";
-const PW = "mail:password:enc";
-const STATUS = "mail:status";
+/**
+ * Several mailboxes can be read (e.g. the one DB booking mails are forwarded to
+ * and the address given in passenger-rights claims). Account "" is the first one
+ * and keeps the original setting keys; further ones get an id suffix.
+ */
+const ACCOUNTS = "mail:accounts";
+const key = (base: string, acc: string) => (acc ? `${base}:${acc}` : base);
+const CFG = (acc: string) => key("mail:config", acc);
+const PW = (acc: string) => key("mail:password:enc", acc);
+const STATUS = (acc: string) => key("mail:status", acc);
+
+/** All mailbox ids, the first one ("") always included. */
+export const listMailAccounts = (): string[] => ["", ...(getSetting<string[]>(ACCOUNTS) ?? []).filter((a) => /^\d{1,3}$/.test(a))];
+
+export function addMailAccount(): string {
+  const extra = listMailAccounts().slice(1);
+  const id = String(Math.max(1, ...extra.map(Number)) + 1);
+  setSetting(ACCOUNTS, [...extra, id]);
+  return id;
+}
+const known = (acc: string) => {
+  if (!listMailAccounts().includes(acc)) throw new Error("Postfach unbekannt.");
+  return acc;
+};
 
 export const DEFAULT_MAIL: MailConfig = { enabled: false, host: "", port: 993, user: "", folder: "INBOX", sinceDays: 180 };
 const EMPTY_STATUS: MailStatus = { lastRunAt: null, lastOk: null, lastMessage: null, imported: 0, uidValidity: null, seen: [] };
 
-export const getMailConfig = (): MailConfig => ({ ...DEFAULT_MAIL, ...(getSetting<Partial<MailConfig>>(CFG) ?? {}) });
-export const getMailStatus = (): MailStatus => ({ ...EMPTY_STATUS, ...(getSetting<Partial<MailStatus>>(STATUS) ?? {}) });
-export const hasMailPassword = () => !!getSetting<string>(PW);
+export const getMailConfig = (acc = ""): MailConfig => ({ ...DEFAULT_MAIL, ...(getSetting<Partial<MailConfig>>(CFG(acc)) ?? {}) });
+export const getMailStatus = (acc = ""): MailStatus => ({ ...EMPTY_STATUS, ...(getSetting<Partial<MailStatus>>(STATUS(acc)) ?? {}) });
+export const hasMailPassword = (acc = "") => !!getSetting<string>(PW(acc));
 
-export function setMailConfig(c: Partial<MailConfig> & { password?: string }): MailConfig {
-  const cur = getMailConfig();
+export function setMailConfig(c: Partial<MailConfig> & { password?: string }, acc = ""): MailConfig {
+  known(acc);
+  const cur = getMailConfig(acc);
   const next: MailConfig = {
     enabled: typeof c.enabled === "boolean" ? c.enabled : cur.enabled,
     host: typeof c.host === "string" ? c.host.trim().slice(0, 200) : cur.host,
@@ -52,23 +74,26 @@ export function setMailConfig(c: Partial<MailConfig> & { password?: string }): M
     sinceDays: typeof c.sinceDays === "number" ? Math.min(3650, Math.max(1, Math.round(c.sinceDays))) : cur.sinceDays,
   };
   // Changing account or folder starts over (UIDs are per mailbox).
-  if (next.host !== cur.host || next.user !== cur.user || next.folder !== cur.folder) setSetting(STATUS, { ...getMailStatus(), uidValidity: null, seen: [] });
+  if (next.host !== cur.host || next.user !== cur.user || next.folder !== cur.folder) setSetting(STATUS(acc), { ...getMailStatus(acc), uidValidity: null, seen: [] });
   // The stored password belongs to one account: never send it to a new host/user.
   const accountChanged = (cur.host && next.host !== cur.host) || (cur.user && next.user !== cur.user);
-  if (accountChanged && !(typeof c.password === "string" && c.password)) setSetting(PW, null);
-  setSetting(CFG, next);
-  if (typeof c.password === "string" && c.password) setSetting(PW, encrypt(c.password));
+  if (accountChanged && !(typeof c.password === "string" && c.password)) setSetting(PW(acc), null);
+  setSetting(CFG(acc), next);
+  if (typeof c.password === "string" && c.password) setSetting(PW(acc), encrypt(c.password));
   return next;
 }
 
-export function forgetMailAccount(): void {
-  setSetting(CFG, DEFAULT_MAIL);
-  setSetting(PW, null);
-  setSetting(STATUS, EMPTY_STATUS);
+/** Drops the access data; a further mailbox is removed altogether. */
+export function forgetMailAccount(acc = ""): void {
+  known(acc);
+  setSetting(CFG(acc), acc ? null : DEFAULT_MAIL);
+  setSetting(PW(acc), null);
+  setSetting(STATUS(acc), acc ? null : EMPTY_STATUS);
+  if (acc) setSetting(ACCOUNTS, listMailAccounts().slice(1).filter((a) => a !== acc));
 }
 
-function client(cfg: MailConfig): ImapFlow {
-  const blob = getSetting<string>(PW);
+function client(cfg: MailConfig, acc: string): ImapFlow {
+  const blob = getSetting<string>(PW(acc));
   if (!cfg.host || !cfg.user || !blob) throw new Error("Server, Benutzer und Passwort eintragen.");
   const c = new ImapFlow({
     host: cfg.host,
@@ -103,8 +128,8 @@ export function friendlyMailError(e: unknown): string {
 }
 
 /** Folder list for the settings picker (also tests the login). */
-export async function listFolders(cfg = getMailConfig()): Promise<string[]> {
-  const c = client(cfg);
+export async function listFolders(acc = ""): Promise<string[]> {
+  const c = client(getMailConfig(known(acc)), acc);
   try {
     await c.connect();
   } catch (e) {
@@ -131,19 +156,21 @@ export function looksLikeBooking(from: string, subject: string, structure: unkno
 
 declare global {
   // eslint-disable-next-line no-var
-  var __mailSyncRunning: boolean | undefined;
+  var __mailSyncRunning: Set<string> | undefined;
 }
 
-export async function syncMail(): Promise<MailStatus> {
-  if (globalThis.__mailSyncRunning) return getMailStatus();
-  globalThis.__mailSyncRunning = true;
-  const cfg = getMailConfig();
-  const status = getMailStatus();
+export async function syncMail(acc = ""): Promise<MailStatus> {
+  known(acc);
+  const running = (globalThis.__mailSyncRunning ??= new Set());
+  if (running.has(acc)) return getMailStatus(acc);
+  running.add(acc);
+  const cfg = getMailConfig(acc);
+  const status = getMailStatus(acc);
   let imported = 0;
   let claimUpdates = 0;
   const problems: string[] = [];
   try {
-    const c = client(cfg);
+    const c = client(cfg, acc);
     await c.connect();
     try {
       const box = await c.mailboxOpen(cfg.folder, { readOnly: true });
@@ -155,7 +182,7 @@ export async function syncMail(): Promise<MailStatus> {
       const uids = ((await c.search({ since }, { uid: true })) || []).filter((u) => !seen.has(u));
       // Progress is stored after every message, so a restart mid-run never redoes or loses work.
       const save = (final = false) =>
-        setSetting(STATUS, {
+        setSetting(STATUS(acc), {
           lastRunAt: Date.now(),
           lastOk: problems.length === 0,
           lastMessage: [
@@ -221,11 +248,16 @@ export async function syncMail(): Promise<MailStatus> {
       await c.logout().catch(() => {});
     }
   } catch (e) {
-    setSetting(STATUS, { ...status, lastRunAt: Date.now(), lastOk: false, lastMessage: friendlyMailError(e) });
+    setSetting(STATUS(acc), { ...status, lastRunAt: Date.now(), lastOk: false, lastMessage: friendlyMailError(e) });
   } finally {
-    globalThis.__mailSyncRunning = false;
+    running.delete(acc);
   }
-  return getMailStatus();
+  return getMailStatus(acc);
+}
+
+/** Start a mailbox over: every mail in the period is looked at again. */
+export function resetMailSeen(acc = ""): void {
+  setSetting(STATUS(known(acc)), { ...getMailStatus(acc), seen: [] });
 }
 
 declare global {
@@ -233,12 +265,15 @@ declare global {
   var __mailSyncTimer: NodeJS.Timeout | undefined;
 }
 
-/** Background poll every 15 minutes while enabled (started from bootstrap). */
+/** Background poll every 15 minutes for every enabled mailbox (started from bootstrap). */
 export function startMailPolling(): void {
   if (globalThis.__mailSyncTimer) return;
   globalThis.__mailSyncTimer = setInterval(() => {
     try {
-      if (getMailConfig().enabled && hasMailPassword()) void syncMail();
+      // one mailbox after the other (each keeps its own progress)
+      void (async () => {
+        for (const acc of listMailAccounts()) if (getMailConfig(acc).enabled && hasMailPassword(acc)) await syncMail(acc).catch(() => {});
+      })();
     } catch {
       /* never crash the server from the poller */
     }

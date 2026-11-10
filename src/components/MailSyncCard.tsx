@@ -5,11 +5,19 @@ import { Button, Input, Spinner, Switch } from "@/components/ui";
 import { SettingsSection } from "@/components/SettingsSection";
 import { formatAgo } from "@/lib/time";
 
-interface View {
+interface Account {
+  id: string;
   config: { enabled: boolean; host: string; port: number; user: string; folder: string; sinceDays: number };
   hasPassword: boolean;
   status: { lastRunAt: number | null; lastOk: boolean | null; lastMessage: string | null; imported: number; seenCount: number };
 }
+interface View {
+  accounts: Account[];
+  /** address DB answers online claims at (claimant data) — and whether a mailbox here reads it */
+  claimEmail: string | null;
+  claimEmailRead: boolean;
+}
+type Call = (action: string, extra?: Record<string, unknown>) => Promise<(View & { folders?: string[] }) | null>;
 
 const KNOWN: [RegExp, string][] = [
   [/@gmx\.(de|net|at|ch)$/i, "imap.gmx.net"],
@@ -21,27 +29,23 @@ const KNOWN: [RegExp, string][] = [
   [/@mailbox\.org$/i, "imap.mailbox.org"],
 ];
 
-/** Settings: import DB booking mails from one IMAP folder automatically. */
+const isConfigured = (a: Account) => !!(a.config.host && a.config.user && a.hasPassword);
+
+/** Settings: import DB mails (bookings, changes, claim answers) from one or more IMAP mailboxes automatically. */
 export function MailSyncCard() {
   const [v, setV] = React.useState<View | null>(null);
-  const [f, setF] = React.useState({ host: "", port: "993", user: "", password: "", folder: "INBOX", sinceDays: 180, enabled: false });
-  const [folders, setFolders] = React.useState<string[]>([]);
   const [busy, setBusy] = React.useState<string | null>(null);
   const [err, setErr] = React.useState<string | null>(null);
 
-  const apply = (d: View) => {
-    setV(d);
-    setF((o) => ({ ...o, ...d.config, port: String(d.config.port), password: "" }));
-  };
   React.useEffect(() => {
     fetch("/api/mailsync")
       .then((r) => r.json())
-      .then(apply)
+      .then((d) => d.accounts && setV(d))
       .catch(() => {});
   }, []);
 
-  async function call(action: string, extra: Record<string, unknown> = {}) {
-    setBusy(action);
+  const call: Call = async (action, extra = {}) => {
+    setBusy(`${extra.account ?? ""}:${action}`);
     setErr(null);
     try {
       const res = await fetch("/api/mailsync", {
@@ -51,7 +55,7 @@ export function MailSyncCard() {
       });
       const d = await res.json().catch(() => ({}));
       if (!res.ok) setErr(d.error ?? "Fehler");
-      if (d.config) apply(d);
+      if (d.accounts) setV(d);
       return res.ok ? d : null;
     } catch {
       setErr("Keine Verbindung zum Server");
@@ -59,20 +63,19 @@ export function MailSyncCard() {
     } finally {
       setBusy(null);
     }
-  }
-  const save = (extra: Record<string, unknown> = {}) =>
-    call("save", { ...f, port: Number(f.port) || 993, password: f.password || undefined, ...extra });
+  };
 
   const title = "Buchungsmails automatisch abrufen";
   if (!v) return <SettingsSection id="mails" title={title} state="loading" />;
-  const configured = !!(v.config.host && v.config.user && v.hasPassword);
-  const ok = configured && v.config.enabled && v.status.lastOk !== false;
-  const summary = !configured
+  const ready = v.accounts.filter(isConfigured);
+  const ok = ready.length > 0 && ready.every((a) => a.config.enabled && a.status.lastOk !== false) && v.claimEmailRead;
+  const summary = !ready.length
     ? "Nicht eingerichtet"
     : [
-        v.config.enabled ? `alle 15 min aus „${v.config.folder}“` : "automatischer Abruf aus",
-        v.status.lastRunAt && `${v.status.lastOk ? "zuletzt" : "Fehler"} ${formatAgo(v.status.lastRunAt)}`,
-        `${v.status.imported} importiert`,
+        ready.length === 1 ? `alle 15 min aus „${ready[0].config.folder}“` : `${ready.length} Postfächer, alle 15 min`,
+        ready.some((a) => a.status.lastOk === false) && "Fehler beim Abruf",
+        !v.claimEmailRead && "Antwort-Adresse der Anträge wird nicht gelesen",
+        `${ready.reduce((n, a) => n + a.status.imported, 0)} importiert`,
       ]
         .filter(Boolean)
         .join(" · ");
@@ -80,10 +83,52 @@ export function MailSyncCard() {
   return (
     <SettingsSection id="mails" title={title} state={ok ? "done" : "todo"} summary={summary}>
       <p className="mb-3 text-xs text-muted-foreground">
-        Die App liest einen Ordner deines Postfachs (IMAP, nur lesen – nichts wird verschoben, markiert oder gelöscht)
-        und übernimmt jede DB-Buchungsbestätigung als Fahrt. Das Passwort wird verschlüsselt gespeichert. Bei GMX/WEB.DE
-        muss in den Postfach-Einstellungen „POP3/IMAP Abruf“ erlaubt sein.
+        Die App liest je Postfach einen Ordner (IMAP, nur lesen – nichts wird verschoben, markiert oder gelöscht) und
+        übernimmt DB-Buchungen, Änderungsmails, Gutscheine und Fahrgastrechte-Bescheide. Passwörter werden verschlüsselt
+        gespeichert. Bei GMX/WEB.DE muss in den Postfach-Einstellungen „POP3/IMAP Abruf“ erlaubt sein.
       </p>
+      {!v.claimEmailRead && v.claimEmail && (
+        <p className="mb-3 rounded-xl border border-warning/40 bg-warning/10 p-2.5 text-sm">
+          Online eingereichte Fahrgastrechte-Anträge nennen <b>{v.claimEmail}</b> – dorthin schickt die DB ihre Bescheide. Dieses
+          Postfach liest die App nicht: unten als weiteres Postfach eintragen (oder dorthin weiterleiten), sonst fehlen
+          die Antworten.
+        </p>
+      )}
+      <div className="space-y-4">
+        {v.accounts.map((a, i) => (
+          <MailAccount key={a.id || "first"} a={a} n={i + 1} many={v.accounts.length > 1} call={call} busy={busy} />
+        ))}
+      </div>
+      <div className="mt-3">
+        <Button size="sm" variant="outline" disabled={!!busy} onClick={() => call("add")}>
+          + Weiteres Postfach
+        </Button>
+      </div>
+      {err && <p className="mt-2 text-sm text-danger">{err}</p>}
+    </SettingsSection>
+  );
+}
+
+function MailAccount({ a, n, many, call, busy }: { a: Account; n: number; many: boolean; call: Call; busy: string | null }) {
+  const [f, setF] = React.useState({ ...a.config, port: String(a.config.port), password: "" });
+  // a fresh answer from the server (save, sync) → take its values, keep a typed password out
+  const saved = JSON.stringify(a.config);
+  React.useEffect(() => setF({ ...a.config, port: String(a.config.port), password: "" }), [saved]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [folders, setFolders] = React.useState<string[]>([]);
+  const acc = { account: a.id };
+  const save = () => call("save", { ...acc, ...f, port: Number(f.port) || 993, password: f.password || undefined });
+  const is = (action: string) => busy === `${a.id}:${action}`;
+  const configured = isConfigured(a);
+  const v = a;
+
+  return (
+    <div className={many ? "rounded-xl border border-border p-3" : ""}>
+      {many && (
+        <div className="mb-2 text-sm font-semibold">
+          Postfach {n}
+          {a.config.user ? <span className="ml-2 font-normal text-muted-foreground">{a.config.user}</span> : null}
+        </div>
+      )}
       <div className="grid gap-2 sm:grid-cols-6">
         <Input
           className="sm:col-span-3"
@@ -120,11 +165,11 @@ export function MailSyncCard() {
           disabled={!!busy}
           onClick={async () => {
             if (!(await save())) return;
-            const d = await call("folders");
+            const d = await call("folders", acc);
             if (d?.folders) setFolders(d.folders);
           }}
         >
-          {busy === "folders" || busy === "save" ? <Spinner /> : null} Verbindung testen & Ordner laden
+          {is("folders") || is("save") ? <Spinner /> : null} Verbindung testen & Ordner laden
         </Button>
         {folders.length > 0 && <span className="text-xs text-success">Verbindung ok ✓</span>}
       </div>
@@ -174,25 +219,27 @@ export function MailSyncCard() {
           variant="outline"
           disabled={!!busy || !configured}
           onClick={async () => {
-            if (await save()) await call("sync");
+            if (await save()) await call("sync", acc);
           }}
         >
-          {busy === "sync" ? <Spinner /> : null} Jetzt abrufen
+          {is("sync") ? <Spinner /> : null} Jetzt abrufen
         </Button>
         {configured && (
-          <>
-            <Button variant="ghost" size="sm" disabled={!!busy} onClick={() => call("rescan")} title="Alle Mails im Zeitraum noch einmal prüfen">
-              Alle neu prüfen
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="text-danger"
-              onClick={() => confirm("Zugangsdaten löschen?") && call("forget").then(() => setFolders([]))}
-            >
-              Zugang entfernen
-            </Button>
-          </>
+          <Button variant="ghost" size="sm" disabled={!!busy} onClick={() => call("rescan", acc)} title="Alle Mails im Zeitraum noch einmal prüfen">
+            Alle neu prüfen
+          </Button>
+        )}
+        {(configured || a.id) && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-danger"
+            onClick={() =>
+              confirm(a.id ? "Dieses Postfach entfernen?" : "Zugangsdaten löschen?") && call("forget", acc).then(() => setFolders([]))
+            }
+          >
+            {a.id ? "Postfach entfernen" : "Zugang entfernen"}
+          </Button>
         )}
       </div>
       {v.status.lastRunAt && (
@@ -200,7 +247,6 @@ export function MailSyncCard() {
           Letzter Abruf {formatAgo(v.status.lastRunAt)}: {v.status.lastMessage} · insgesamt {v.status.imported} importiert
         </p>
       )}
-      {err && <p className="mt-2 text-sm text-danger">{err}</p>}
-    </SettingsSection>
+    </div>
   );
 }
