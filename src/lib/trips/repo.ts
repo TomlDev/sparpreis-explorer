@@ -63,7 +63,7 @@ export interface ClaimBrief {
   paidAmount: number | null;
   caseId: string | null;
 }
-const CLAIM_RANK: Record<string, number> = { paid: 0, rejected: 1, submitted: 2, draft: 3 };
+const CLAIM_RANK: Record<string, number> = { paid: 0, query: 1, followup: 2, rejected: 3, submitted: 4, draft: 5 };
 export function claimBriefs(tripIds: string[]): Map<string, ClaimBrief> {
   const out = new Map<string, ClaimBrief>();
   if (!tripIds.length) return out;
@@ -531,6 +531,7 @@ export function saveClaim(
     paidAmount: c.paidAmount ?? null,
     caseId: c.caseId ?? null,
     decidedAt: c.decidedAt ?? null,
+    contactedAt: c.contactedAt ?? null,
     reason: c.reason ?? null,
     notes: c.notes ?? null,
     createdAt: now(),
@@ -538,6 +539,32 @@ export function saveClaim(
   };
   db.insert(claims).values(row).run();
   return row;
+}
+
+export const CLAIM_CONTACT = { phone: "Telefon", mail: "E-Mail", form: "Kontaktformular", center: "Reisezentrum", letter: "Brief" } as const;
+export type ClaimContactChannel = keyof typeof CLAIM_CONTACT;
+
+/**
+ * Talked to DB again about a claim (asked, added details, objected to a rejection):
+ * the claim goes "In Klärung" (until the next decision letter) and the contact is
+ * kept on the trip as a note, so the history stays readable.
+ */
+export function recordClaimContact(
+  tripId: string,
+  claimId: string,
+  c: { channel: ClaimContactChannel; text?: string | null; at?: number },
+): ClaimRow | null {
+  const cur = db.select().from(claims).where(and(eq(claims.id, claimId), eq(claims.tripId, tripId))).get();
+  if (!cur) return null;
+  const at = c.at && Number.isFinite(c.at) ? c.at : now();
+  const was = cur.status === "rejected" ? " (nach Ablehnung)" : cur.status === "paid" ? " (nach Auszahlung)" : cur.status === "query" ? " (auf Rückfrage der DB)" : "";
+  addEvent(tripId, {
+    type: "note",
+    at,
+    text: `Fahrgastrechte${cur.caseId ? ` ${cur.caseId}` : ""}: Kontakt per ${CLAIM_CONTACT[c.channel]}${was}${c.text?.trim() ? ` – ${c.text.trim().slice(0, 1000)}` : ""}`,
+    legIndex: null,
+  });
+  return saveClaim(tripId, { id: claimId, status: "followup", contactedAt: at, submittedAt: cur.submittedAt ?? at });
 }
 
 /**

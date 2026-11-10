@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { ensureReady } from "@/lib/bootstrap";
 import { applyConfirmation, applyDecision, parseClaimConfirmation, parseClaimDecision } from "@/lib/trips/claimMail";
-import { createTrip, getTrip, saveClaim } from "@/lib/trips/repo";
+import { createTrip, getTrip, recordClaimContact, saveClaim } from "@/lib/trips/repo";
 
 // Anonymised samples in the shape of DB's passenger-rights mails.
 const CONFIRMATION = `Hallo Frau Erika Mustermann,
@@ -122,6 +122,29 @@ describe("Fahrgastrechte-Post der DB", () => {
     const again = applyDecision(parseClaimDecision(REJECTED)!)!;
     expect(again.tripCreated).toBe(false);
     expect(again.claim.id).toBe(r.claim.id);
+  });
+
+  it("liest eine Rückfrage der DB als „DB fragt nach“, nicht als Ablehnung", () => {
+    const query = `08.11.2026
+Ihr Anliegen vom 26.10.2026 | Fall-ID 26V00000051
+Auftragsnummer: 200000000051
+Ihre Reise am 18.10.2026
+Hallo Frau Mustermann,
+vielen Dank für die Zusendung Ihrer Anfrage zu Ihrer Reise von Triberg nach Bochum
+Hbf. Gern kümmern wir uns so schnell wie möglich um Ihr Anliegen.
+Um prüfen zu können, ob Sie im Rahmen der Fahrgastrechte Anspruch auf eine Entschädigung/
+Erstattung haben, benötigen wir folgende Angaben:
+· Ihre tatsächliche Ankunftszeit am Zielbahnhof Ihrer Fahrkarte
+Bitte senden Sie uns die Angaben zusammen mit diesem Schreiben an die oben aufgeführte Adresse.
+Wenn Sie weitere Fragen haben, rufen Sie uns bitte an.`;
+    const d = parseClaimDecision(query)!;
+    expect(d).toMatchObject({ caseId: "26V00000051", paid: false, decidedDate: "2026-11-08", query: ["Ihre tatsächliche Ankunftszeit am Zielbahnhof Ihrer Fahrkarte"] });
+    const r = applyDecision(d)!;
+    expect(r.claim).toMatchObject({ status: "query", decidedAt: null });
+    expect(r.claim.reason).toMatch(/DB braucht noch: Ihre tatsächliche Ankunftszeit.*08\.11\.2026/);
+    // answered by phone after the letter → the same letter again doesn't turn it back
+    recordClaimContact(r.trip.id, r.claim.id, { channel: "phone", at: Date.parse("2026-11-10T14:00:00Z") });
+    expect(applyDecision(d)!.claim.status).toBe("followup");
   });
 
   it("macht aus der Ablehnung eine Auszahlung, wenn die DB nach erneuter Prüfung doch zahlt", () => {

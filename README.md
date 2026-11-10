@@ -222,6 +222,13 @@ Gebucht ist ein günstiges Ticket mit hoher Flex-Chance, jetzt zählt der Tag se
   Antrag an jeder Fahrt, dazu „Fahrplan geändert“ bei jeder Änderungsmail. Hin- und Rückfahrt
   eines Auftrags verlinken einander, die Fahrt nennt den Gutschein, mit dem sie bezahlt wurde,
   und den Restgutschein daraus; in der Gutschein-Liste führen die Auftragsnummern zur Fahrt.
+- **Rückfrage und Klärung:** Fragt die DB per Brief nach Angaben („benötigen wir folgende
+  Angaben …“), steht der Antrag auf **„DB fragt nach“** – mit dem, was sie braucht, und einer
+  Erinnerung. Hast du angerufen, geschrieben oder Einspruch eingelegt, trägst du das am Antrag
+  ein („Kontakt eintragen“: Telefon, E-Mail, Formular, Reisezentrum, Brief, mit Notiz): Er steht
+  dann auf **„In Klärung“**, der Kontakt bleibt als Notiz an der Fahrt, und nach vier Wochen ohne
+  neuen Bescheid erinnert die App ans Nachhaken. Der nächste Bescheid setzt ihn wieder auf
+  ausgezahlt oder abgelehnt.
 - **Bescheide per Mail:** Eingangsbestätigung, Auszahlung und Ablehnung landen am Antrag –
   auch ein späterer Korrektur-Bescheid („nach erneuter Prüfung … angewiesen“) macht aus
   „abgelehnt“ wieder „ausgezahlt“.

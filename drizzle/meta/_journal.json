@@ -85,6 +85,13 @@
       "when": 1792047046768,
       "tag": "0011_complete_squirrel_girl",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1794324052124,
+      "tag": "0012_heavy_centennial",
+      "breakpoints": true
     }
   ]
 }

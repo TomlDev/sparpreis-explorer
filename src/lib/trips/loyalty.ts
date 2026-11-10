@@ -284,6 +284,30 @@ export function reminders(today = todayLocal()): Reminder[] {
   // Submitted claims without an answer after a month (DB: "innerhalb eines Monats").
   const open = db.select({ claim: claims, trip: trips }).from(claims).innerJoin(trips, eq(claims.tripId, trips.id)).orderBy(desc(claims.submittedAt)).all();
   for (const { claim, trip } of open) {
+    // DB asked for details: due now
+    if (claim.status === "query") {
+      out.push({
+        id: `claim-${claim.id}`,
+        date: claim.decidedAt && Number.isFinite(claim.decidedAt) ? berlinDay(claim.decidedAt) : berlinDay(claim.updatedAt),
+        title: `Fahrgastrechte${claim.caseId ? ` ${claim.caseId}` : ""}: DB fragt nach`,
+        detail: `${claim.reason ?? "Die DB braucht noch Angaben."} (${trip.originName} → ${trip.destName}, Fahrt vom ${trip.date.split("-").reverse().join(".")}). Nachgereicht? Auf der Fahrt „Kontakt eintragen“.`,
+        kind: "claim",
+        href: `/reisen/${trip.id}#fahrgastrechte`,
+      });
+      continue;
+    }
+    // "In Klärung": counted from the last contact
+    if (claim.status === "followup" && claim.contactedAt && Number.isFinite(claim.contactedAt)) {
+      out.push({
+        id: `claim-${claim.id}`,
+        date: addDays(berlinDay(claim.contactedAt), 28),
+        title: `Fahrgastrechte${claim.caseId ? ` ${claim.caseId}` : ""}: in Klärung, noch keine Antwort`,
+        detail: `Zuletzt Kontakt am ${new Date(claim.contactedAt).toLocaleDateString("de-DE", { timeZone: "Europe/Berlin" })} (${trip.originName} → ${trip.destName}, Fahrt vom ${trip.date.split("-").reverse().join(".")}). Kommt kein neuer Bescheid, noch einmal nachhaken.`,
+        kind: "claim",
+        href: `/reisen/${trip.id}#fahrgastrechte`,
+      });
+      continue;
+    }
     if (claim.status !== "submitted" || !claim.submittedAt || !Number.isFinite(claim.submittedAt)) continue;
     out.push({
       id: `claim-${claim.id}`,

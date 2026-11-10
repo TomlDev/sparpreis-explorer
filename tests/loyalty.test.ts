@@ -15,7 +15,7 @@ import {
   savePoints,
   updateBahnCard,
 } from "@/lib/trips/loyalty";
-import { claimBriefs, createTrip, getTrip, listTrips, openTickets, saveClaim, tripIdsByOrder, updateTrip } from "@/lib/trips/repo";
+import { claimBriefs, createTrip, getTrip, listTrips, openTickets, recordClaimContact, saveClaim, tripIdsByOrder, updateTrip } from "@/lib/trips/repo";
 import { addVoucher, deleteVoucher, getVouchers, inOneYear, updateVoucher } from "@/lib/trips/serviceMail";
 
 beforeAll(() => ensureReady());
@@ -178,5 +178,20 @@ describe("BahnCard, BahnBonus, Aktionen", () => {
     expect(getTrip(out.id)!.sameOrder.map((t) => t.id)).toEqual([back.id]);
     expect(getTrip(back.id)!.sameOrder.map((t) => t.direction)).toEqual(["outbound"]);
     expect(tripIdsByOrder(["300000000031", null, "999"])).toEqual({ "300000000031": out.id });
+  });
+
+  it("setzt einen Antrag nach Kontakt mit der DB auf „In Klärung“ und erinnert ab dem Kontakt", () => {
+    const t = createTrip({ orderNumber: "300000000041", direction: "outbound", legs: [{ fromName: "Bochum Hbf", toName: "Triberg", plannedDeparture: "2020-06-01T05:00:00.000Z", plannedArrival: "2020-06-01T11:00:00.000Z" }] });
+    const c = saveClaim(t.id, { type: "aborted_return", status: "rejected", caseId: "26V00000041", submittedAt: Date.parse("2020-06-02T10:00:00Z") });
+    const at = Date.parse("2020-07-10T09:00:00Z");
+    const after = recordClaimContact(t.id, c.id, { channel: "phone", text: "Abbruch in Mannheim nachgewiesen", at })!;
+    expect(after).toMatchObject({ status: "followup", contactedAt: at, caseId: "26V00000041" });
+    const note = getTrip(t.id)!.events.at(-1)!;
+    expect(note.text).toMatch(/26V00000041: Kontakt per Telefon \(nach Ablehnung\) – Abbruch in Mannheim nachgewiesen/);
+    expect(claimBriefs([t.id]).get(t.id)?.status).toBe("followup");
+    const r = reminders().find((x) => x.id === `claim-${c.id}`)!;
+    expect(r.title).toMatch(/in Klärung/);
+    expect(r.date).toBe("2020-08-07"); // 4 weeks after the contact
+    expect(recordClaimContact("trip_x", c.id, { channel: "phone" })).toBeNull(); // other trip's claim
   });
 });

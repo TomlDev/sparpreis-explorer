@@ -72,6 +72,8 @@ export interface ClaimDecision {
   /** "Fahrtabbruch", "Verspätung unter 60 min", … */
   items: string[];
   reason: string | null;
+  /** Not a decision: DB asks for details first ("benötigen wir folgende Angaben") — what it wants. */
+  query: string[] | null;
 }
 
 export function parseClaimDecision(text: string): ClaimDecision | null {
@@ -86,6 +88,15 @@ export function parseClaimDecision(text: string): ClaimDecision | null {
   const travel = /Ihre Reise am (\d{2}\.\d{2}\.\d{4})/.exec(t)?.[1];
   const submitted = /Ihr Anliegen vom (\d{2}\.\d{2}\.\d{4})/.exec(t)?.[1];
   const decided = /(\d{2}\.\d{2}\.\d{4})\s*\n\s*Ihr Anliegen vom/.exec(text)?.[1];
+  // A query ("Anfrage"): DB needs more details before it decides — no decision yet.
+  const asks = /benötigen wir folgende Angaben:?\s*(.+?)\s*(?:Bitte senden|Wenn Sie weitere Fragen|$)/.exec(t)?.[1];
+  const query = asks
+    ? asks
+        .split(/\s*[·•]\s*/)
+        .map((x) => x.trim())
+        .filter(Boolean)
+        .slice(0, 8)
+    : null;
   return {
     caseId,
     orderNumber: /Auftragsnummer:\s*(\d{6,})/.exec(t)?.[1] ?? null,
@@ -103,6 +114,7 @@ export function parseClaimDecision(text: string): ClaimDecision | null {
     })(),
     items,
     reason: reason ? reason.slice(0, 1500) : null,
+    query: query?.length ? query : asks ? [asks.slice(0, 300)] : null,
   };
 }
 
@@ -198,7 +210,8 @@ export function applyConfirmation(c: ClaimConfirmation, receivedAt: number): Cla
   if (!known) return null;
   const trip = enrichTrip(known, info, true);
   const k = classify(c.problem);
-  const decided = found.claim && (found.claim.status === "paid" || found.claim.status === "rejected");
+  // decided, asked back or "In Klärung" (contacted DB again) stays — a receipt doesn't turn it back into "submitted"
+  const decided = found.claim && ["paid", "rejected", "followup", "query"].includes(found.claim.status);
   const claim = saveClaim(trip.id, {
     id: found.claim?.id,
     caseId: c.caseId,
@@ -219,6 +232,7 @@ export function applyDecision(d: ClaimDecision, pdf?: { name: string; bytes: Buf
   if (!known) return null;
   const trip = enrichTrip(known, { problem: d.items[0] ?? null });
   if (trip.price == null && d.ticketValue != null) updateTrip(trip.id, { price: d.ticketValue });
+  if (d.query) return applyQuery(d, found.claim, trip, pdf);
   const claim = saveClaim(trip.id, {
     id: found.claim?.id,
     caseId: d.caseId,
@@ -242,4 +256,37 @@ export function applyDecision(d: ClaimDecision, pdf?: { name: string; bytes: Buf
     else if (have.caption !== caption) db.update(attachments).set({ caption }).where(eq(attachments.id, have.id)).run();
   }
   return { kind: "decision", caseId: d.caseId, claim, trip, tripCreated: !found.trip };
+}
+
+/**
+ * DB's query letter ("Anfrage"): it needs details (e.g. the actual arrival) before
+ * deciding → claim "query" ("Rückfrage der DB") with what it asks for. An answer
+ * already given (contact after the letter) or a decision that came later stays.
+ */
+function applyQuery(d: ClaimDecision, cur: ClaimRow | null, trip: TripRow, pdf?: { name: string; bytes: Buffer }): ClaimMailResult {
+  const letterAt = d.decidedDate ? dayMs(d.decidedDate) : Date.now();
+  const newer = cur && (((cur.status === "paid" || cur.status === "rejected") && (cur.decidedAt ?? 0) > letterAt) || (cur.status === "followup" && (cur.contactedAt ?? 0) >= letterAt));
+  const claim = newer
+    ? cur!
+    : saveClaim(trip.id, {
+        id: cur?.id,
+        caseId: d.caseId,
+        type: cur?.type ?? classify(d.items[0]).type,
+        status: "query",
+        submittedAt: cur?.submittedAt ?? (d.submittedDate ? dayMs(d.submittedDate) : null),
+        // the query is no decision: an earlier "rejected" from a misread letter is undone
+        decidedAt: cur?.status === "paid" ? cur.decidedAt : null,
+        reason: `DB braucht noch: ${d.query!.join(" · ")} (Schreiben vom ${d.decidedDate?.split("-").reverse().join(".") ?? "?"})`,
+      });
+  if (pdf) {
+    const have = db
+      .select()
+      .from(attachments)
+      .where(and(eq(attachments.tripId, trip.id), eq(attachments.kind, "decision"), eq(attachments.size, pdf.bytes.length)))
+      .get();
+    const caption = "Rückfrage der DB";
+    if (!have) saveAttachment(trip.id, { name: pdf.name, type: "application/pdf", bytes: pdf.bytes }, "decision", caption);
+    else if (have.caption !== caption) db.update(attachments).set({ caption }).where(eq(attachments.id, have.id)).run();
+  }
+  return { kind: "decision", caseId: d.caseId, claim, trip, tripCreated: false };
 }

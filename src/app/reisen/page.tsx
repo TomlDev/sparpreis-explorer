@@ -291,6 +291,8 @@ async function setPlan(id: string, plan: "take" | "skip" | null) {
 function claimChip(c: ClaimBrief): { text: string; cls: string } {
   if (c.status === "paid") return { text: `${c.paidAmount != null ? formatEuro(c.paidAmount) : "Antrag"} erstattet`, cls: "bg-success/15 text-success" };
   if (c.status === "rejected") return { text: "Antrag abgelehnt", cls: "bg-danger/10 text-danger" };
+  if (c.status === "followup") return { text: "Antrag in Klärung", cls: "bg-warning/15 text-warning" };
+  if (c.status === "query") return { text: "DB fragt nach", cls: "bg-warning/15 text-warning" };
   if (c.status === "submitted") return { text: `Antrag offen${c.amount != null ? ` ${formatEuro(c.amount)}` : ""}`, cls: "bg-primary/15 text-primary" };
   return { text: "Antrag nicht eingereicht", cls: "bg-muted text-muted-foreground" };
 }
@@ -491,7 +493,7 @@ interface ClaimsOverview {
   claims: { id: string; caseId: string | null; status: string; paidAmount: number | null; amount: number | null; tripId: string; date: string; route: string }[];
 }
 
-const CLAIM_LABEL: Record<string, string> = { draft: "Formular erstellt", submitted: "Eingereicht", paid: "Ausgezahlt", rejected: "Abgelehnt" };
+const CLAIM_LABEL: Record<string, string> = { draft: "Formular erstellt", submitted: "Eingereicht", query: "Rückfrage der DB", followup: "In Klärung", paid: "Ausgezahlt", rejected: "Abgelehnt" };
 
 /** Passenger-rights overview: money received, open and rejected claims. */
 function ClaimsSummary() {

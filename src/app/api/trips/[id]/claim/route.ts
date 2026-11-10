@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { ensureReady } from "@/lib/bootstrap";
 import { fillClaimForm, FORM_ADDRESS } from "@/lib/trips/claimForm";
 import { getProfile, ibanValid } from "@/lib/trips/profile";
-import { deleteAttachment, getTrip, saveAttachment, saveClaim } from "@/lib/trips/repo";
+import { CLAIM_CONTACT, deleteAttachment, getTrip, recordClaimContact, saveAttachment, saveClaim, type ClaimContactChannel } from "@/lib/trips/repo";
 import { getSignature } from "@/lib/trips/signature";
 import { arrivalDelayMin, assess, ticketSpan, type FormJourney } from "@/lib/trips/rules";
 
@@ -74,7 +74,7 @@ export async function POST(req: Request, { params }: Ctx) {
   return NextResponse.json({ attachment, claim, entitlement: ent, address: FORM_ADDRESS });
 }
 
-const CLAIM_STATUSES = new Set(["draft", "submitted", "paid", "rejected"]);
+const CLAIM_STATUSES = new Set(["draft", "submitted", "query", "followup", "paid", "rejected"]);
 
 /** Track a claim: submitted / paid (amount) / rejected. */
 export async function PATCH(req: Request, { params }: Ctx) {
@@ -82,6 +82,14 @@ export async function PATCH(req: Request, { params }: Ctx) {
   const tripId = (await params).id;
   const b = (await req.json().catch(() => ({}))) as Record<string, unknown>;
   if (typeof b.id !== "string") return NextResponse.json({ error: "id fehlt" }, { status: 400 });
+  // contact with DB about it (call, mail, …) → "In Klärung"
+  if (b.contact && typeof b.contact === "object") {
+    const c = b.contact as Record<string, unknown>;
+    const channel = typeof c.channel === "string" && c.channel in CLAIM_CONTACT ? (c.channel as ClaimContactChannel) : "phone";
+    const at = typeof c.at === "number" && Number.isFinite(c.at) && c.at <= Date.now() + 86_400_000 ? c.at : undefined;
+    const claim = recordClaimContact(tripId, b.id, { channel, text: typeof c.text === "string" ? c.text : null, at });
+    return claim ? NextResponse.json({ claim }) : NextResponse.json({ error: "Antrag nicht gefunden" }, { status: 404 });
+  }
   const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : v === null ? null : undefined);
   const claim = saveClaim(tripId, {
     id: b.id,
@@ -90,6 +98,7 @@ export async function PATCH(req: Request, { params }: Ctx) {
     paidAt: num(b.paidAt),
     paidAmount: num(b.paidAmount),
     decidedAt: num(b.decidedAt),
+    contactedAt: num(b.contactedAt),
     notes: typeof b.notes === "string" ? b.notes.slice(0, 2000) : undefined,
   });
   return NextResponse.json({ claim });

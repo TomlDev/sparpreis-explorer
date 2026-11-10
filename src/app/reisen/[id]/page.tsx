@@ -39,6 +39,8 @@ const EVENT_LABEL: Record<string, string> = {
 const CLAIM_STATUS: Record<string, string> = {
   draft: "Formular erstellt",
   submitted: "Eingereicht",
+  query: "Rückfrage der DB",
+  followup: "In Klärung",
   paid: "Ausgezahlt",
   rejected: "Abgelehnt",
 };
@@ -1121,12 +1123,21 @@ function TicketPanel({
  */
 /** Collapsed "Was ist passiert?": the claim in one line — state, amount, since when, case id. */
 function claimSummary(claims: ClaimRow[]): string {
-  const c = claims.find((x) => x.status === "paid") ?? claims.find((x) => x.status === "rejected") ?? claims.find((x) => x.status === "submitted");
+  const c =
+    claims.find((x) => x.status === "paid") ??
+    claims.find((x) => x.status === "query") ??
+    claims.find((x) => x.status === "followup") ??
+    claims.find((x) => x.status === "rejected") ??
+    claims.find((x) => x.status === "submitted");
   if (!c) return "";
   const day = (ms: number | null) => (ms ? new Date(ms).toLocaleDateString("de-DE", { timeZone: "Europe/Berlin" }) : null);
   const parts =
     c.status === "paid"
       ? [`Antrag ausgezahlt${c.paidAmount != null ? ` ${formatEuro(c.paidAmount)}` : ""}`, day(c.paidAt) && `am ${day(c.paidAt)}`]
+      : c.status === "query"
+        ? ["DB fragt nach – Angaben nachreichen", day(c.decidedAt) && `Schreiben vom ${day(c.decidedAt)}`]
+      : c.status === "followup"
+        ? ["Antrag in Klärung", day(c.contactedAt) && `Kontakt am ${day(c.contactedAt)}`]
       : c.status === "rejected"
         ? ["Antrag abgelehnt", day(c.decidedAt) && `am ${day(c.decidedAt)}`]
         : [`Antrag eingereicht${c.amount != null ? ` (${formatEuro(c.amount)})` : ""}`, day(c.submittedAt) && `am ${day(c.submittedAt)}`, "noch keine Antwort"];
@@ -1135,7 +1146,7 @@ function claimSummary(claims: ClaimRow[]): string {
 
 function OutcomeCard({ t, ent, children }: { t: Detail; ent: ReturnType<typeof assess>; children: React.ReactNode }) {
   const past = !!t.plannedDeparture && new Date(t.plannedDeparture).getTime() < Date.now();
-  const sent = t.claims.some((c) => c.status === "submitted" || c.status === "paid" || c.status === "rejected");
+  const sent = t.claims.some((c) => ["submitted", "query", "followup", "paid", "rejected"].includes(c.status));
   const settled = sent || (t.status !== "planned" && t.status !== "lifted" && !ent?.payable);
   const summary =
     t.status === "planned"
@@ -1181,7 +1192,7 @@ function OutcomeCard({ t, ent, children }: { t: Detail; ent: ReturnType<typeof a
 
 /** Passenger-rights state right in the header — taps through to the claim below. */
 function ClaimChip({ claims }: { claims: ClaimRow[] }) {
-  const rank: Record<string, number> = { paid: 0, rejected: 1, submitted: 2, draft: 3 };
+  const rank: Record<string, number> = { paid: 0, query: 1, followup: 2, rejected: 3, submitted: 4, draft: 5 };
   const c = [...claims].sort((a, b) => (rank[a.status] ?? 9) - (rank[b.status] ?? 9))[0];
   if (!c) return null;
   const text =
@@ -1189,6 +1200,10 @@ function ClaimChip({ claims }: { claims: ClaimRow[] }) {
       ? `${c.paidAmount != null ? formatEuro(c.paidAmount) : "Antrag"} erstattet`
       : c.status === "rejected"
         ? "Antrag abgelehnt"
+        : c.status === "query"
+          ? "DB fragt nach – Angaben nachreichen"
+        : c.status === "followup"
+          ? `Antrag in Klärung${c.contactedAt ? ` · Kontakt ${new Date(c.contactedAt).toLocaleDateString("de-DE")}` : ""}`
         : c.status === "submitted"
           ? `Antrag offen${c.amount != null ? ` · ${formatEuro(c.amount)}` : ""}`
           : "Antrag nicht eingereicht";
@@ -1197,7 +1212,15 @@ function ClaimChip({ claims }: { claims: ClaimRow[] }) {
       href="#fahrgastrechte"
       className={cn(
         "mt-2 inline-block rounded-full px-2.5 py-1 text-xs font-medium underline-offset-2 hover:underline",
-        c.status === "paid" ? "bg-success/15 text-success" : c.status === "rejected" ? "bg-danger/10 text-danger" : c.status === "submitted" ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground",
+        c.status === "paid"
+          ? "bg-success/15 text-success"
+          : c.status === "rejected"
+            ? "bg-danger/10 text-danger"
+            : c.status === "followup" || c.status === "query"
+              ? "bg-warning/15 text-warning"
+              : c.status === "submitted"
+                ? "bg-primary/15 text-primary"
+                : "bg-muted text-muted-foreground",
       )}
       title={c.caseId ? `Fall-ID ${c.caseId}` : undefined}
     >
@@ -1543,8 +1566,94 @@ function ClaimLine({ c, tripId, onSaved }: { c: ClaimRow; tripId: string; onSave
         </span>
       )}
       {c.status === "rejected" && day(c.decidedAt) && <span className="text-muted-foreground">am {day(c.decidedAt)}</span>}
+      {c.status === "followup" && day(c.contactedAt) && <span className="text-muted-foreground">Kontakt am {day(c.contactedAt)}</span>}
     </div>
-      {c.reason && <p className={cn("text-xs", c.status === "rejected" ? "text-danger" : "text-muted-foreground")}>{c.reason}</p>}
+      {c.reason && (
+        <p className={cn("text-xs", c.status === "rejected" ? "text-danger" : c.status === "query" ? "font-medium text-warning" : "text-muted-foreground")}>{c.reason}</p>
+      )}
+      {c.status !== "draft" && <ClaimContact c={c} save={save} />}
+    </div>
+  );
+}
+
+const CONTACT_CHANNELS: [string, string][] = [
+  ["phone", "Telefon"],
+  ["mail", "E-Mail"],
+  ["form", "Kontaktformular"],
+  ["center", "Reisezentrum"],
+  ["letter", "Brief"],
+];
+
+/** "Mit der DB gesprochen": called / wrote about the claim (e.g. after a rejection) → "In Klärung", kept as a note. */
+function ClaimContact({ c, save }: { c: ClaimRow; save: (body: Record<string, unknown>) => Promise<void> }) {
+  const [open, setOpen] = React.useState(false);
+  const [f, setF] = React.useState({ channel: "phone", text: "", day: todayLocal() });
+  const [busy, setBusy] = React.useState(false);
+  if (!open)
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className={cn(
+          "text-xs font-medium underline-offset-2 hover:underline",
+          c.status === "rejected" || c.status === "query" ? "rounded-lg border border-primary px-2 py-1 text-primary" : "text-primary",
+        )}
+      >
+        {c.status === "query"
+          ? "📞 Angaben nachgereicht? Eintragen"
+          : c.status === "rejected"
+          ? "📞 Nachgehakt / Einspruch eingelegt? Eintragen"
+          : c.status === "followup"
+            ? "📞 Wieder Kontakt gehabt? Eintragen"
+            : "📞 Mit der DB Kontakt gehabt? Eintragen"}
+      </button>
+    );
+  return (
+    <div className="space-y-2 rounded-xl bg-muted/40 p-2.5">
+      <div className="text-xs text-muted-foreground">
+        Kontakt mit der DB zu diesem Antrag – danach steht er auf „In Klärung“, bis ein neuer Bescheid kommt.
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <select
+          className="h-9 rounded-lg border border-input bg-background px-2 text-sm"
+          value={f.channel}
+          onChange={(e) => setF({ ...f, channel: e.target.value })}
+          aria-label="Wie"
+        >
+          {CONTACT_CHANNELS.map(([k, v]) => (
+            <option key={k} value={k}>
+              {v}
+            </option>
+          ))}
+        </select>
+        <Input type="date" className="h-9 w-40" value={f.day} max={todayLocal()} onChange={(e) => setF({ ...f, day: e.target.value })} aria-label="Wann" />
+      </div>
+      <textarea
+        className="min-h-16 w-full rounded-xl border border-input bg-background p-2 text-sm"
+        placeholder="Was wurde besprochen? z. B. Abbruch in Mannheim nachgewiesen, Prüfung läuft neu"
+        value={f.text}
+        onChange={(e) => setF({ ...f, text: e.target.value })}
+      />
+      <div className="flex gap-2">
+        <Button
+          size="sm"
+          disabled={busy}
+          onClick={async () => {
+            setBusy(true);
+            // the chosen day at the current time of day (today: now)
+            const at = f.day === todayLocal() ? Date.now() : new Date(berlinIso(f.day, "12:00") ?? Date.now()).getTime();
+            await save({ contact: { channel: f.channel, text: f.text, at } });
+            setBusy(false);
+            setOpen(false);
+            setF({ channel: "phone", text: "", day: todayLocal() });
+          }}
+        >
+          {busy ? <Spinner /> : null} Speichern
+        </Button>
+        <Button size="sm" variant="ghost" onClick={() => setOpen(false)}>
+          Abbrechen
+        </Button>
+      </div>
     </div>
   );
 }

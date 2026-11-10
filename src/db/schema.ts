@@ -720,7 +720,7 @@ export const claims = sqliteTable(
       .references(() => trips.id, { onDelete: "cascade" }),
     // delay | not_started | aborted_return | aborted_partial | extra_costs
     type: text("type").notNull(),
-    status: text("status").notNull().default("draft"), // draft | submitted | paid | rejected
+    status: text("status").notNull().default("draft"), // draft | submitted | query (DB asks back) | followup | paid | rejected
     delayMin: integer("delay_min"),
     amount: real("amount"),
     payout: text("payout").notNull().default("transfer"), // transfer | voucher
@@ -730,6 +730,8 @@ export const claims = sqliteTable(
     /** DB's case number ("Fall-ID 26V00000001"). */
     caseId: text("case_id"),
     decidedAt: integer("decided_at"),
+    /** Last contact with DB about it after submitting (call, mail, …) → status "followup" ("In Klärung"). */
+    contactedAt: integer("contacted_at"),
     /** DB's explanation of the decision. */
     reason: text("reason"),
     notes: text("notes"),

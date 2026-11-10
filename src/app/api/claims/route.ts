@@ -19,7 +19,7 @@ export async function GET() {
   return NextResponse.json({
     paidTotal: Math.round(paid.reduce((s, r) => s + (r.claim.paidAmount ?? 0), 0) * 100) / 100,
     paidCount: paid.length,
-    pending: rows.filter((r) => r.claim.status === "submitted").length,
+    pending: rows.filter((r) => ["submitted", "query", "followup"].includes(r.claim.status)).length,
     drafts: rows.filter((r) => r.claim.status === "draft").length,
     rejected: rows.filter((r) => r.claim.status === "rejected").length,
     claims: rows.map((r) => ({
