@@ -635,7 +635,7 @@ export const trips = sqliteTable(
     legs: text("legs", { mode: "json" }).$type<TripLeg[]>().notNull(),
     // planned | done | delayed | aborted | not_started | cancelled | moved | lifted
     status: text("status").notNull().default("planned"),
-    // search | pdf | email | db | manual | copy (replacement journey, see movedFrom)
+    // search | pdf | email | photo | db | manual | copy (replacement journey, see movedFrom)
     source: text("source").notNull().default("manual"),
     fingerprint: text("fingerprint"),
     refreshToken: text("refresh_token"),

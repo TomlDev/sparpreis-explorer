@@ -153,14 +153,15 @@ export default function TripsPage() {
               ref={importRef}
               type="file"
               multiple
-              accept=".eml,.pdf,.ics,message/rfc822,application/pdf,text/calendar"
+              // image/* → on the phone also "Fotomediathek" / "Foto aufnehmen" (ticket screenshots, paper tickets)
+              accept=".eml,.pdf,.ics,message/rfc822,application/pdf,text/calendar,image/*"
               className="hidden"
               onChange={(e) => {
                 if (e.target.files?.length) importFiles(e.target.files);
                 e.target.value = "";
               }}
             />
-            <Button size="sm" variant="outline" disabled={importing} onClick={() => importRef.current?.click()} title="DB-Buchungsmail (.eml), Ticket-PDF oder .ics">
+            <Button size="sm" variant="outline" disabled={importing} onClick={() => importRef.current?.click()} title="DB-Buchungsmail (.eml), Ticket-PDF, .ics oder Foto/Screenshot des Tickets">
               {importing ? <Spinner /> : <FileUp className="h-4 w-4" />} Import
             </Button>
             <Button size="sm" onClick={() => setAdding((a) => !a)}>

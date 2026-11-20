@@ -9,6 +9,7 @@ import { htmlToText, parseBookingHtml, parseIcs, parseTicketText, type ParsedBoo
 import { createTrip, dayOf, mergeClaimDuplicates, saveAttachment, updateTrip } from "./repo";
 import { applyBahnCardCancellation, parseBahnCardCancellation, parseBahnCardOrder, parseBahnCardService, parsePoints, parsePromo, saveBahnCard, savePoints, savePromo } from "./loyalty";
 import { applyPendingScheduleChanges, applyScheduleChange, parseScheduleChange, parseVoucher, rememberScheduleChange, saveVoucher } from "./serviceMail";
+import { isImage, navigatorLegs, ocrImage, parseNavigatorTicket, type NavigatorTicket } from "./ticketPhoto";
 
 export interface ImportFile {
   name: string;
@@ -110,6 +111,8 @@ export async function importDocument(file: ImportFile, source = "import", depth 
   let icsJourneys: ParsedJourney[] = [];
   let html: ReturnType<typeof parseBookingHtml> | null = null;
   const pdfs: ImportFile[] = [];
+  /** ticket photos: kept with the trip like the PDF */
+  const photos: ImportFile[] = [];
 
   if (isEml(file)) {
     const mail = await simpleParser(file.bytes);
@@ -206,7 +209,16 @@ export async function importDocument(file: ImportFile, source = "import", depth 
     }
   } else if (isPdf(file)) pdfs.push(file);
   else if (isIcs(file)) icsJourneys = parseIcs(file.bytes.toString("utf8"), file.name);
-  else throw new Error("Bitte eine DB-Buchungsmail (.eml), ein Ticket-PDF oder eine .ics-Datei wählen.");
+  else if (isImage(file)) {
+    // Screenshot of the ticket in DB Navigator, or a photo of a paper ticket.
+    const text = await ocrImage(file.bytes);
+    const nav = parseNavigatorTicket(text);
+    if (nav) return applyNavigatorTicket(nav, file, source);
+    const parsed = parseTicketText(text);
+    if (!parsed.orderNumber && !parsed.journeys.length) throw new Error("Auf dem Foto kein DB-Ticket erkannt.");
+    booking = parsed;
+    photos.push(file);
+  } else throw new Error("Bitte eine DB-Buchungsmail (.eml), ein Ticket-PDF, eine .ics-Datei oder ein Foto/Screenshot des Tickets wählen.");
 
   for (const p of pdfs) {
     const parsed = parseTicketText(await pdfText(p.bytes));
@@ -287,17 +299,89 @@ export async function importDocument(file: ImportFile, source = "import", depth 
       trip = createTrip({ ...fields, legs: j.legs, date: date ?? undefined, source, ticket });
       result.created.push(trip);
     }
-    // Keep the ticket PDF with the trip (once).
-    for (const p of pdfs) {
-      const have = db
-        .select()
-        .from(attachments)
-        .where(and(eq(attachments.tripId, trip.id), eq(attachments.kind, "ticket"), eq(attachments.size, p.bytes.length)))
-        .get();
-      if (!have) saveAttachment(trip.id, p, "ticket", "Ticket");
-    }
+    // Keep the ticket PDF / photo with the trip (once).
+    for (const p of pdfs) keepTicketFile(trip.id, p, "Ticket");
+    for (const p of photos) keepTicketFile(trip.id, p, "Ticket (Foto)");
   }
   mergeClaimDuplicates();
+  applyPendingScheduleChanges();
+  return result;
+}
+
+function keepTicketFile(tripId: string, f: ImportFile, caption: string): void {
+  const have = db
+    .select()
+    .from(attachments)
+    .where(and(eq(attachments.tripId, tripId), eq(attachments.kind, "ticket"), eq(attachments.size, f.bytes.length)))
+    .get();
+  if (!have) saveAttachment(tripId, f, "ticket", caption);
+}
+
+/**
+ * One direction from a DB Navigator ticket screenshot: create the trip or fill in
+ * what a known one (same order, same direction) lacks. A lifted Zugbindung is kept
+ * like a change notice; with both directions known the order's total is their sum.
+ */
+export function applyNavigatorTicket(n: NavigatorTicket, photo: ImportFile, source: string): ImportResult {
+  const result: ImportResult = { created: [], updated: [], warnings: [] };
+  if (!n.date) throw new Error("Auf dem Ticket-Foto kein Reisedatum erkannt.");
+  if (!n.trains.length && !n.zugbindungLifted) result.warnings.push("Keine Züge auf dem Foto erkannt – Verbindung bitte prüfen.");
+  const lifted = n.zugbindungLifted
+    ? { notifiedAt: new Date().toISOString(), zugbindungLifted: true, text: "Laut Ticket in DB Navigator: Zugbindung aufgehoben (jeder Zug zum Ziel erlaubt)." }
+    : null;
+  const existing = n.orderNumber
+    ? db
+        .select()
+        .from(trips)
+        .where(and(eq(trips.orderNumber, n.orderNumber), eq(trips.direction, n.direction), isNull(trips.movedFrom)))
+        .get()
+    : null;
+  let trip: TripRow;
+  if (existing) {
+    const t = existing.ticket ?? {};
+    // fill gaps only — never replace what a mail/PDF already brought
+    const ticket = { ...n.ticket, ...Object.fromEntries(Object.entries(t).filter(([, v]) => v != null && !(Array.isArray(v) && !v.length))) };
+    if (lifted && !t.scheduleChange) ticket.scheduleChange = lifted;
+    const bare = existing.legs.length <= 1 && !existing.legs[0]?.plannedDeparture;
+    trip = updateTrip(existing.id, {
+      ticket,
+      klasse: existing.klasse ?? n.klasse,
+      ticketType: existing.ticketType ?? n.ticket.tariff ?? null,
+      roundTrip: true,
+      ...(bare && n.trains.length ? { legs: navigatorLegs(n) } : {}),
+    })!;
+    result.updated.push(trip);
+  } else {
+    trip = createTrip({
+      orderNumber: n.orderNumber,
+      direction: n.direction,
+      roundTrip: true,
+      price: n.price,
+      klasse: n.klasse,
+      ticketType: n.ticket.tariff ?? null,
+      legs: navigatorLegs(n),
+      date: n.date,
+      source,
+      ticket: { ...n.ticket, ...(lifted ? { scheduleChange: lifted } : {}) },
+    });
+    result.created.push(trip);
+  }
+  keepTicketFile(trip.id, photo, "Ticket (Foto)");
+  // the other direction known too → the order's total for both
+  const other = n.orderNumber
+    ? db
+        .select()
+        .from(trips)
+        .where(and(eq(trips.orderNumber, n.orderNumber), isNull(trips.movedFrom)))
+        .all()
+        .filter((x) => x.id !== trip.id && x.direction && x.direction !== n.direction)
+    : [];
+  const mine = trip.ticket?.directionPrice;
+  const theirs = other[0]?.ticket?.directionPrice;
+  if (other.length === 1 && mine != null && theirs != null) {
+    const total = Math.round((mine + theirs) * 100) / 100;
+    for (const x of [trip, other[0]]) if (x.price == null || x.price === x.ticket?.directionPrice) updateTrip(x.id, { price: total });
+  }
   applyPendingScheduleChanges();
   return result;
 }

@@ -223,7 +223,8 @@ export default function TripPage() {
           <PlanRow t={t} plan={plan} rivals={rivals} onSave={patch} />
           {t.ticket?.scheduleChange && (
             <div className="mt-2 rounded-xl border border-warning/40 bg-warning/10 p-2.5 text-sm">
-              <b>Fahrplanänderung</b> (Mail vom {new Date(t.ticket.scheduleChange.notifiedAt).toLocaleDateString("de-DE")}):{" "}
+              <b>Fahrplanänderung</b> ({t.ticket.scheduleChange.text.startsWith("Laut Ticket") ? "laut Ticket in DB Navigator" : "Mail"} vom{" "}
+              {new Date(t.ticket.scheduleChange.notifiedAt).toLocaleDateString("de-DE")}):{" "}
               {t.ticket.scheduleChange.zugbindungLifted
                 ? "Zugbindung aufgehoben – du darfst jeden Zug zu deinem Ziel nehmen, auch früher oder auf anderer Route."
                 : "bitte die Verbindung prüfen."}

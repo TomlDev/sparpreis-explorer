@@ -4,7 +4,7 @@ import { importDocument } from "@/lib/trips/importer";
 
 export const runtime = "nodejs";
 
-/** Import DB booking mails (.eml), ticket PDFs or .ics files (multipart "file", several allowed). */
+/** Import DB booking mails (.eml), ticket PDFs, .ics files or ticket photos/screenshots (multipart "file", several allowed). */
 export async function POST(req: Request) {
   ensureReady();
   const form = await req.formData().catch(() => null);
@@ -17,7 +17,7 @@ export async function POST(req: Request) {
       continue;
     }
     try {
-      const r = await importDocument({ name: f.name, type: f.type, bytes: Buffer.from(await f.arrayBuffer()) }, /\.eml$/i.test(f.name) ? "email" : /\.ics$/i.test(f.name) ? "ics" : "pdf");
+      const r = await importDocument({ name: f.name, type: f.type, bytes: Buffer.from(await f.arrayBuffer()) }, /\.eml$/i.test(f.name) ? "email" : /\.ics$/i.test(f.name) ? "ics" : /^image\//.test(f.type) || /\.(png|jpe?g|webp|heic)$/i.test(f.name) ? "photo" : "pdf");
       results.push({ file: f.name, ...r });
     } catch (e) {
       results.push({ file: f.name, error: (e as Error).message });

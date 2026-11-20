@@ -172,6 +172,12 @@ Gebucht ist ein günstiges Ticket mit hoher Flex-Chance, jetzt zählt der Tag se
 - **Kalender mit all deinen Fahrten:** aus der Suche per „Gebucht“, von Hand, automatisch aus
   den Buchungsmails (IMAP) oder aus deinem **DB-Kundenkonto** (inklusive Preis je Richtung
   bei Hin- und Rückfahrt).
+- **Ticket als Foto:** „Import“ nimmt auch Fotos und Screenshots – auf dem Handy direkt aus der
+  Fotomediathek oder mit der Kamera. Ein Screenshot des Tickets in DB Navigator („Reisedetails →
+  Ticket“) wird zur Fahrt: Richtung, gebundene Züge, Preis je Richtung, Auftrag, BahnCard und
+  „Zugbindung aufgehoben“; mit beiden Richtungen kennt die App den Gesamtpreis. Auch ein Foto
+  eines Papiertickets wird gelesen. Die Texterkennung läuft auf deinem Server (tesseract), das
+  Foto bleibt an der Fahrt.
 - **Mehrere Postfächer:** Die App liest beliebig viele IMAP-Postfächer (je eins mit eigenem
   Ordner und Stand) – z. B. das, an das deine Buchungsmails gehen, und die Adresse, die in
   online eingereichten Fahrgastrechte-Anträgen steht. Wird diese Antwort-Adresse von keinem
