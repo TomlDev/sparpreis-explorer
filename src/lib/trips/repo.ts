@@ -264,7 +264,7 @@ export function updateTrip(id: string, patch: Partial<Pick<TripRow, Editable>>):
 }
 
 /** Same wall-clock times n days later (Berlin time, so a DST change keeps 08:12 at 08:12). */
-function shiftIso(iso: string | null, days: number): string | null {
+export function shiftIso(iso: string | null, days: number): string | null {
   if (!iso) return iso;
   const day = formatInTimeZone(new Date(iso), TZ, "yyyy-MM-dd");
   const [y, m, d] = day.split("-").map(Number);

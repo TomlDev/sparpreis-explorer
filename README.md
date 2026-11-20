@@ -217,6 +217,10 @@ Gebucht ist ein günstiges Ticket mit hoher Flex-Chance, jetzt zählt der Tag se
 - **„Kontrolliert“:** speichert Zeit und Standort einer Fahrkartenkontrolle und hält fest,
   zwischen welchen Halten der Zug gerade war und wie viel Verspätung er hatte.
 - **Screenshots und Belege** direkt vom Handy zur Fahrt hochladen.
+- **Abgebrochen – wo?** Zur Auswahl stehen alle Halte der gebuchten Züge, auch die
+  Zwischenhalte (einmal aus dem Fahrplan nachgeschlagen, ältere Fahrten über denselben Zug
+  am gleichen Wochentag). Warst du auf einer anderen Strecke unterwegs (z. B. bei
+  aufgehobener Zugbindung), suchst du unter „Anderer Bahnhof …“ jeden Bahnhof.
 - **Fahrgastrechte auf Knopfdruck:** Die App rechnet nach den Regeln der DB aus, was dir
   zusteht (25 % ab 60 min, 50 % ab 120 min, Erstattung bei Nichtantritt oder Abbruch). Sie
   erzeugt das **offizielle DB-Formular fertig ausgefüllt und unterschrieben** oder reicht den

@@ -526,6 +526,10 @@ export interface TripLeg {
   arrPlatform?: string | null;
   /** Seat reservation on this train ("Wg. 2, Pl. 31 33"). */
   reservation?: string | null;
+  /** Stops between boarding and leaving (looked up from the timetable for "Abgebrochen in"). */
+  stops?: string[];
+  /** false: looked up, train not in the timetable */
+  stopsFound?: boolean;
   /** What really happened on this train — combined from rtLive and rtOpen (see trips/realtime). */
   rt?: LegRealtime | null;
   /** Our own live tracking on the travel day (latest observation) — never overwritten by DB data. */

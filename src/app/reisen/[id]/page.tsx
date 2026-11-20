@@ -767,6 +767,118 @@ function TicketFields({ t, onSave }: { t: Detail; onSave: (b: Record<string, unk
   );
 }
 
+interface LegStationsView {
+  label: string;
+  stations: string[];
+  complete: boolean | null;
+}
+
+/** As stored on the trip — boarding, the stops in between (once looked up), leaving. */
+function storedStations(legs: Detail["legs"]): LegStationsView[] {
+  return legs
+    .filter((l) => !l.isWalking)
+    .map((l) => ({
+      label: `${l.lineName ? `${l.lineName} ` : ""}${l.fromName} → ${l.toName}`,
+      stations: [l.fromName, ...(l.stops ?? []), l.toName].filter((s) => s !== "Umstieg"),
+      complete: l.stops === undefined ? null : l.stopsFound !== false,
+    }));
+}
+
+const OTHER = "__other__";
+
+/**
+ * "Abgebrochen in": every station on the booked trains, the stops in between
+ * included (looked up once from the timetable), or any other station (searched)
+ * — e.g. when the Zugbindung was lifted and another route was taken.
+ */
+function AbortStation({ tripId, legs, value, onChange }: { tripId: string; legs: Detail["legs"]; value: string; onChange: (v: string) => void }) {
+  const [groups, setGroups] = React.useState(() => storedStations(legs));
+  const [loading, setLoading] = React.useState(() => storedStations(legs).some((g) => g.complete === null));
+  const known = React.useMemo(() => new Set(groups.flatMap((g) => g.stations)), [groups]);
+  const [other, setOther] = React.useState(() => !!value && !storedStations(legs).some((g) => g.stations.includes(value)));
+  const [hits, setHits] = React.useState<string[]>([]);
+  React.useEffect(() => {
+    if (!loading) return;
+    let off = false;
+    fetch(`/api/trips/${tripId}/stops`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { legs?: LegStationsView[] } | null) => {
+        if (off || !d?.legs) return;
+        setGroups(d.legs);
+        if (value && d.legs.some((g) => g.stations.includes(value))) setOther(false);
+      })
+      .catch(() => {})
+      .finally(() => !off && setLoading(false));
+    return () => {
+      off = true;
+    };
+    // once per trip
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tripId]);
+  React.useEffect(() => {
+    if (!other || value.trim().length < 2 || known.has(value)) return setHits([]);
+    const ctl = new AbortController();
+    const timer = setTimeout(() => {
+      fetch(`/api/locations?q=${encodeURIComponent(value.trim())}`, { signal: ctl.signal })
+        .then((r) => (r.ok ? r.json() : { locations: [] }))
+        .then((d: { locations?: { name: string }[] }) => setHits(Array.from(new Set((d.locations ?? []).map((l) => l.name))).slice(0, 8)))
+        .catch(() => {});
+    }, 250);
+    return () => {
+      clearTimeout(timer);
+      ctl.abort();
+    };
+  }, [other, value, known]);
+  const seen = new Set<string>();
+  return (
+    <div className="flex flex-col gap-2">
+      <select
+        className="h-10 w-full min-w-0 max-w-full truncate rounded-xl border border-input bg-background px-3"
+        value={other ? OTHER : value}
+        onChange={(e) => {
+          if (e.target.value === OTHER) {
+            setOther(true);
+            onChange("");
+          } else {
+            setOther(false);
+            onChange(e.target.value);
+          }
+        }}
+      >
+        {groups.map((g) => {
+          const fresh = g.stations.filter((s) => !seen.has(s));
+          fresh.forEach((s) => seen.add(s));
+          return fresh.length ? (
+            <optgroup key={g.label} label={g.label}>
+              {fresh.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </optgroup>
+          ) : null;
+        })}
+        <option value={OTHER}>Anderer Bahnhof …</option>
+      </select>
+      {other && (
+        <>
+          <Input list="abort-station-hits" placeholder="Bahnhof suchen, z. B. Hornberg" value={value} onChange={(e) => onChange(e.target.value)} autoFocus />
+          <datalist id="abort-station-hits">
+            {hits.map((h) => (
+              <option key={h} value={h} />
+            ))}
+          </datalist>
+        </>
+      )}
+      {loading ? (
+        <span className="text-xs text-muted-foreground">Zwischenhalte werden geladen …</span>
+      ) : groups.some((g) => g.complete === false) ? (
+        <span className="text-xs text-muted-foreground">Nicht für jeden Zug sind die Zwischenhalte bekannt – sonst „Anderer Bahnhof …“.</span>
+      ) : null}
+    </div>
+  );
+}
+
 /** Status + what actually happened (actual arrival, abort station, expected delay, free text). */
 function WhatHappened({
   t,
@@ -784,7 +896,6 @@ function WhatHappened({
 }) {
   const span = ticketSpan(t);
   const rt = realtimeSummary(t.legs);
-  const stations = Array.from(new Set(t.legs.flatMap((l) => [l.fromName, l.toName])));
   const [status, setStatus] = React.useState(t.status);
   const [arrDate, setArrDate] = React.useState(t.actualArrival ? berlinDate(t.actualArrival) : span.arrival ? berlinDate(span.arrival) : t.date);
   const [arrTime, setArrTime] = React.useState(t.actualArrival ? formatTime(t.actualArrival) : "");
@@ -926,18 +1037,10 @@ function WhatHappened({
         )}
         {status === "aborted" && (
           <div className="flex flex-col gap-1 text-sm">
-            <label className="flex flex-col gap-1">
+            <div className="flex flex-col gap-1">
               <span className="text-xs text-muted-foreground">Abgebrochen in</span>
-              <select
-                className="h-10 w-full min-w-0 max-w-full truncate rounded-xl border border-input bg-background px-3"
-                value={abortedAt}
-                onChange={(e) => setAbortedAt(e.target.value)}
-              >
-                {stations.map((s) => (
-                  <option key={s}>{s}</option>
-                ))}
-              </select>
-            </label>
+              <AbortStation tripId={t.id} legs={t.legs} value={abortedAt} onChange={setAbortedAt} />
+            </div>
             <label className="flex items-center gap-2 py-1">
               <input type="checkbox" checked={returned} onChange={(e) => setReturned(e.target.checked)} /> zurück zum Startbahnhof gefahren
             </label>
