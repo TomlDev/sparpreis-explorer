@@ -67,8 +67,8 @@ describe("Abgebrochen in: Zwischenhalte", () => {
   });
 
   it("Ticket ohne Züge (Zugbindung aufgehoben): nur Start und Ziel", () => {
-    expect(legStations([{ fromName: "Gelsenkirchen Hbf", toName: "Furtwangen", plannedDeparture: null, plannedArrival: null }])).toEqual([
-      { label: "Gelsenkirchen Hbf → Furtwangen", stations: ["Gelsenkirchen Hbf", "Furtwangen"], complete: false },
+    expect(legStations([{ fromName: "Bochum Hbf", toName: "Triberg", plannedDeparture: null, plannedArrival: null }])).toEqual([
+      { label: "Bochum Hbf → Triberg", stations: ["Bochum Hbf", "Triberg"], complete: false },
     ]);
   });
 });
