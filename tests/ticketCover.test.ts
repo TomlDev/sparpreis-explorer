@@ -15,7 +15,7 @@ const walk = (a: string, b: string): TripLeg => ({ fromName: a, toName: b, plann
 
 describe("Was deckt das Ticket ab?", () => {
   const trip = [
-    leg("tram", "Erle Krankenhaus, Bochum", "Hauptbahnhof, Bochum"),
+    leg("tram", "Rathaus, Bochum", "Hauptbahnhof, Bochum"),
     walk("Hauptbahnhof, Bochum", "Bochum Hbf"),
     leg("suburban", "Bochum Hbf", "Essen Hbf"),
     leg("nationalExpress", "Essen Hbf", "Offenburg"),
