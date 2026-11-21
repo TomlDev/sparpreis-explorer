@@ -164,6 +164,11 @@ Gebucht ist ein günstiges Ticket mit hoher Flex-Chance, jetzt zählt der Tag se
   stehen jederzeit in der Adresse – Neuladen oder ein geteilter Link zeigt genau das, was du
   siehst (die Ergebnisse kommen dabei aus dem Cache, ohne neue Abfragen). Wer die Startseite
   ohne Parameter öffnet (Logo, eingetippte Adresse), landet wieder bei seinem letzten Stand.
+- **Profil oder einzelner Bahnhof:** Von und Nach sind entweder ein Profil (mehrere Bahnhöfe,
+  Haupt- und Ausweichbahnhof) oder per „Bahnhof suchen …“ genau ein Bahnhof. Gesuchte
+  Bahnhöfe bleiben in der Auswahl, und ein Link mit einem Bahnhof (`o=st:…`) zeigt seinen Namen.
+- **Neue Suche:** Der Knopf unten rechts setzt alles zurück – keine Ergebnisse, heute,
+  Standardroute und -einstellungen. Der Cache bleibt; ihn leert „Alles leeren“ in den Einstellungen.
 - **Wird mit der Zeit besser:** Die App merkt sich Strecken, Umstiegsbahnhöfe und Preise
   deiner Suchen und findet auf der Stammstrecke schneller Treffer.
 

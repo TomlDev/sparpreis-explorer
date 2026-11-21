@@ -3,6 +3,8 @@ import { ensureReady } from "@/lib/bootstrap";
 import { getSetting } from "@/lib/repo/settings";
 import {
   addStation,
+  isStationKey,
+  stationProfile,
   createProfile,
   deleteProfile,
   listProfiles,
@@ -16,10 +18,13 @@ import {
 
 export const runtime = "nodejs";
 
-export async function GET() {
+export async function GET(req: Request) {
   ensureReady();
+  // single stations ("st:<id>") from a link / the last view → their names
+  const resolve = (new URL(req.url).searchParams.get("resolve") ?? "").split(",").filter(isStationKey).slice(0, 4);
   return NextResponse.json({
     profiles: listProfiles(),
+    stations: resolve.map((k) => stationProfile(k)).filter((p) => !!p).map((p) => ({ key: p!.key, label: p!.label })),
     defaultRoute: getSetting<{ originKey: string; destKey: string }>("defaultRoute"),
   });
 }

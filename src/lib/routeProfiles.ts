@@ -3,6 +3,7 @@ import { db } from "@/db/client";
 import { profileStations, routeProfiles } from "@/db/schema";
 import { newId, now } from "@/db/util";
 import { getSetting, setSetting } from "./repo/settings";
+import { getLocation } from "./repo/locations";
 
 export interface ProfileStation {
   id: string;
@@ -106,7 +107,28 @@ function stationsFor(profileId: string): ProfileStation[] {
     }));
 }
 
+/**
+ * A single station instead of a profile: key "st:<location id>" (routing id, as
+ * /api/locations returns it). It behaves like a profile with just that station,
+ * so search, cache, links and `npm run view` need nothing else.
+ */
+export const STATION_KEY = "st:";
+export const isStationKey = (key: string | null | undefined): key is string => !!key && key.startsWith(STATION_KEY);
+
+export function stationProfile(key: string): RouteProfile | null {
+  const id = key.slice(STATION_KEY.length).trim();
+  if (!id) return null;
+  const name = getLocation(id)?.name ?? id;
+  return {
+    id: key,
+    key,
+    label: name,
+    stations: [{ id: key, stationName: name, query: null, locationId: id, priority: 0, resolved: true, enabled: true }],
+  };
+}
+
 export function getProfile(key: string): RouteProfile | null {
+  if (isStationKey(key)) return stationProfile(key);
   const p = db.select().from(routeProfiles).where(eq(routeProfiles.key, key)).get();
   if (!p) return null;
   return { id: p.id, key: p.key, label: p.label, stations: stationsFor(p.id) };

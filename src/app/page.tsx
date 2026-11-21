@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { useSearchParams } from "next/navigation";
-import { ArrowDownUp, SlidersHorizontal, Search, StopCircle, GitCompare, CircleDollarSign, Pencil, CalendarRange, Trash2, Layers, List } from "lucide-react";
+import { ArrowDownUp, SlidersHorizontal, Search, StopCircle, GitCompare, CircleDollarSign, Pencil, CalendarRange, RotateCcw, Layers, List } from "lucide-react";
 import { Sheet } from "@/components/Sheet";
 import { AppHeader } from "@/components/AppHeader";
 import { CalendarStrip } from "@/components/CalendarStrip";
@@ -58,6 +58,17 @@ function Home() {
   const restoreDate = React.useRef<string | null>(null);
 
   const [profiles, setProfiles] = React.useState<Endpoint[]>([]);
+  // single stations searched instead of a profile ("st:<id>"), most recent first
+  const [stations, setStations] = React.useState<Endpoint[]>([]); // filled after mount (localStorage)
+  const pickStation = React.useCallback((e: Endpoint) => {
+    setStations((list) => {
+      const next = [e, ...list.filter((x) => x.key !== e.key)].slice(0, 8);
+      try {
+        localStorage.setItem("recentStations", JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  }, []);
   const [origin, setOrigin] = React.useState<Endpoint | null>(null);
   const [dest, setDest] = React.useState<Endpoint | null>(null);
   const [travelDate, setTravelDate] = React.useState(initialView.date || todayLocal());
@@ -140,7 +151,9 @@ function Home() {
 
   // Load profiles + default route.
   React.useEffect(() => {
-    fetch("/api/profiles")
+    // a single station in the link → its name comes with the profiles
+    const wanted = [initialView.origin, initialView.dest].filter((k): k is string => !!k && k.startsWith("st:"));
+    fetch(`/api/profiles${wanted.length ? `?resolve=${encodeURIComponent(wanted.join(","))}` : ""}`)
       .then((r) => r.json())
       .then((data) => {
         const eps: Endpoint[] = (data.profiles ?? []).map((p: { key: string; label: string }) => ({
@@ -148,9 +161,13 @@ function Home() {
           label: p.label,
         }));
         setProfiles(eps);
+        const fromLink: Endpoint[] = data.stations ?? [];
+        const known = [...eps, ...fromLink, ...readRecentStations()];
+        const recent = readRecentStations();
+        setStations([...recent, ...fromLink.filter((f) => !recent.some((x) => x.key === f.key))]);
         const dr = data.defaultRoute;
         // A link's route wins over the last view, that over the default route.
-        const byKey = (k: string | null | undefined) => (k ? eps.find((e) => e.key === k) : undefined);
+        const byKey = (k: string | null | undefined) => (k ? known.find((e) => e.key === k) : undefined);
         const last = lastView.current;
         setOrigin(byKey(initialView.origin) ?? byKey(last?.origin) ?? byKey(dr?.originKey) ?? eps[0] ?? null);
         setDest(byKey(initialView.dest) ?? byKey(last?.dest) ?? byKey(dr?.destKey) ?? eps[1] ?? null);
@@ -308,21 +325,15 @@ function Home() {
   }
 
   const [clearing, setClearing] = React.useState(false);
-  async function clearSearch() {
+  /** Start over: no results, today, the default route and settings — the server cache stays
+   *  (emptying it is under Einstellungen → Cache). */
+  function resetSearch() {
     if (clearing) return;
-    if (!window.confirm("Aktuelle Suche komplett leeren (Server-Cache, gelernte Daten und Browser)?")) return;
     setClearing(true);
     abort();
-    await fetch("/api/cache", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "clearAll" }),
-    }).catch(() => {});
     try {
-      localStorage.removeItem("lastResults");
-      localStorage.removeItem("lastBody");
+      for (const k of ["lastResults", "lastBody", "lastView"]) localStorage.removeItem(k);
     } catch {}
-    // Hard reset to a clean state (no cached results / URL params left).
     window.location.href = "/";
   }
 
@@ -571,7 +582,7 @@ function Home() {
         <Card ref={formRef} className="p-4 sm:p-5">
           <form onSubmit={submit}>
             <div className="relative flex flex-col gap-2">
-              <EndpointSelect label="Von" value={origin} options={profiles} onChange={setOrigin} />
+              <EndpointSelect label="Von" value={origin} options={profiles} stations={stations} onPickStation={pickStation} onChange={setOrigin} />
               <button
                 type="button"
                 onClick={swap}
@@ -580,7 +591,7 @@ function Home() {
               >
                 <ArrowDownUp className="h-5 w-5" />
               </button>
-              <EndpointSelect label="Nach" value={dest} options={profiles} onChange={setDest} />
+              <EndpointSelect label="Nach" value={dest} options={profiles} stations={stations} onPickStation={pickStation} onChange={setDest} />
             </div>
 
             <div className="mt-3 space-y-3">
@@ -905,13 +916,13 @@ function Home() {
       <div className={"fixed right-4 z-50 flex flex-col items-end gap-2 " + (compare.size >= 2 ? "bottom-20" : "bottom-4")}>
         <button
           type="button"
-          onClick={clearSearch}
+          onClick={resetSearch}
           disabled={clearing}
           className="flex items-center gap-2 rounded-full border border-border bg-card px-4 py-2.5 text-sm font-medium text-muted-foreground shadow-lg transition hover:bg-muted hover:text-foreground disabled:opacity-60"
-          title="Aktuelle Suche leeren (Server-Cache, gelernte Daten & Browser)"
+          title="Suche zurücksetzen: keine Ergebnisse, heute, Standardroute und -einstellungen (der Cache bleibt)"
         >
-          {clearing ? <Spinner /> : <Trash2 className="h-4 w-4" />}
-          <span>Suche leeren</span>
+          {clearing ? <Spinner /> : <RotateCcw className="h-4 w-4" />}
+          <span>Neue Suche</span>
         </button>
 
         {/* "load more prices" — always visible, with counts */}
@@ -1074,35 +1085,141 @@ function Home() {
   );
 }
 
+function readRecentStations(): Endpoint[] {
+  try {
+    const raw = JSON.parse(localStorage.getItem("recentStations") ?? "[]") as Endpoint[];
+    return Array.isArray(raw) ? raw.filter((e) => typeof e?.key === "string" && e.key.startsWith("st:") && typeof e.label === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+const SEARCH_STATION = "__search__";
+
+/**
+ * Start / destination: a profile (several stations, primary + fallbacks) or a
+ * single station found with the search ("Bahnhof suchen …"); searched stations
+ * stay in the list.
+ */
 function EndpointSelect({
   label,
   value,
   options,
+  stations,
+  onPickStation,
   onChange,
 }: {
   label: string;
   value: Endpoint | null;
   options: Endpoint[];
+  stations: Endpoint[];
+  onPickStation: (e: Endpoint) => void;
   onChange: (e: Endpoint) => void;
 }) {
+  const [searching, setSearching] = React.useState(false);
+  const [q, setQ] = React.useState("");
+  const [hits, setHits] = React.useState<Endpoint[]>([]);
+  const [busy, setBusy] = React.useState(false);
+  React.useEffect(() => {
+    if (!searching || q.trim().length < 2) return setHits([]);
+    const ctl = new AbortController();
+    const timer = setTimeout(() => {
+      setBusy(true);
+      fetch(`/api/locations?q=${encodeURIComponent(q.trim())}`, { signal: ctl.signal })
+        .then((r) => (r.ok ? r.json() : { locations: [] }))
+        .then((d: { locations?: { id: string; name: string; type?: string | null }[] }) => {
+          const seen = new Set<string>();
+          setHits(
+            (d.locations ?? [])
+              // stops only — a place / address isn't a station the search can start from
+              .filter((l) => !l.type || l.type === "STOP" || l.type === "station" || l.type === "stop")
+              .filter((l) => !seen.has(l.name) && !!seen.add(l.name))
+              .slice(0, 8)
+              .map((l) => ({ key: `st:${l.id}`, label: l.name })),
+          );
+        })
+        .catch(() => {})
+        .finally(() => setBusy(false));
+    }, 250);
+    return () => {
+      clearTimeout(timer);
+      ctl.abort();
+    };
+  }, [searching, q]);
+  const single = stations.some((s) => s.key === value?.key) ? stations : value?.key.startsWith("st:") ? [value, ...stations] : stations;
+  const choose = (e: Endpoint) => {
+    onPickStation(e);
+    onChange(e);
+    setSearching(false);
+    setQ("");
+  };
   return (
     <div className="rounded-xl border border-input bg-background px-3.5 py-2">
       <div className="text-xs text-muted-foreground">{label}</div>
-      <select
-        value={value?.key ?? ""}
-        onChange={(e) => {
-          const found = options.find((o) => o.key === e.target.value);
-          if (found) onChange(found);
-        }}
-        className="w-full bg-transparent text-base font-medium outline-none"
-      >
-        {options.length === 0 && <option>lädt …</option>}
-        {options.map((o) => (
-          <option key={o.key} value={o.key}>
-            {o.label}
-          </option>
-        ))}
-      </select>
+      {!searching ? (
+        <select
+          value={value?.key ?? ""}
+          onChange={(e) => {
+            if (e.target.value === SEARCH_STATION) return setSearching(true);
+            const found = [...options, ...single].find((o) => o.key === e.target.value);
+            if (found) onChange(found);
+          }}
+          className="w-full bg-transparent pr-12 text-base font-medium outline-none"
+        >
+          {options.length === 0 && <option>lädt …</option>}
+          <optgroup label="Profile (mehrere Bahnhöfe)">
+            {options.map((o) => (
+              <option key={o.key} value={o.key}>
+                {o.label}
+              </option>
+            ))}
+          </optgroup>
+          {single.length > 0 && (
+            <optgroup label="Einzelner Bahnhof">
+              {single.map((o) => (
+                <option key={o.key} value={o.key}>
+                  {o.label}
+                </option>
+              ))}
+            </optgroup>
+          )}
+          <option value={SEARCH_STATION}>Bahnhof suchen …</option>
+        </select>
+      ) : (
+        <div className="pr-12">
+          <div className="flex items-center gap-2">
+            <input
+              autoFocus
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") setSearching(false);
+                if (e.key === "Enter") {
+                  e.preventDefault(); // not the search form
+                  if (hits[0]) choose(hits[0]);
+                }
+              }}
+              placeholder="Bahnhof, z. B. Köln Hbf"
+              className="w-full bg-transparent text-base font-medium outline-none"
+            />
+            {busy && <Spinner />}
+            <button type="button" className="text-xs text-muted-foreground underline" onClick={() => setSearching(false)}>
+              Abbrechen
+            </button>
+          </div>
+          {hits.length > 0 && (
+            <ul className="mt-1 divide-y divide-border">
+              {hits.map((h) => (
+                <li key={h.key}>
+                  <button type="button" className="w-full py-1.5 text-left text-sm hover:text-primary" onClick={() => choose(h)}>
+                    {h.label}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
     </div>
   );
 }
