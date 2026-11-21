@@ -150,6 +150,9 @@ Gebucht ist ein günstiges Ticket mit hoher Flex-Chance, jetzt zählt der Tag se
 - **Gutschein eintragen:** Neue Gutscheine sind vorab ein Jahr gültig (Datum vorausgewählt).
   War er doch nicht eingelöst oder wurde gelöscht, reicht die Nummer – er kommt mit Betrag
   und Gültigkeit wieder als offen zurück.
+- **Eingelöst – rückgängig:** Nach dem Abhaken (oder einer Antwort auf „Welcher Gutschein?“)
+  erscheint unten ein Hinweis mit „Rückgängig“. Solange er steht, bleibt der abgehakte
+  Gutschein an seinem Platz – der nächste rutscht also nicht unter den Finger.
 - **Filter und Sortierung:** Preis, Dauer, Umstiege, ICE-Anteil, Fernverkehrs-Abschnitte,
   Flex-Chance, Anschluss-Quote, Ankunfts- statt Abfahrtszeit und mehr.
 - **Filter kurz ausschalten:** Jeder Grenzwert hat einen Haken – weg damit, und der Filter

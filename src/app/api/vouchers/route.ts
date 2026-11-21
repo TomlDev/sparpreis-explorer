@@ -39,6 +39,20 @@ export async function POST(req: Request) {
       updateVoucher(number, { notUsedIn: [...new Set([...(v?.notUsedIn ?? []), order])] });
       return answered();
     }
+    // undo: the voucher's state before the last change ("Rückgängig" in the toast)
+    if (b.action === "restore" && b.state && typeof b.state === "object") {
+      const s = b.state as Record<string, unknown>;
+      const str = (x: unknown) => (typeof x === "string" ? x : null);
+      updateVoucher(number, {
+        redeemed: s.redeemed === true,
+        usedOrder: str(s.usedOrder),
+        replacedBy: str(s.replacedBy),
+        autoRedeemed: s.autoRedeemed === true,
+        useResolved: s.useResolved === true,
+        notUsedIn: Array.isArray(s.notUsedIn) ? s.notUsedIn.filter((x): x is string => typeof x === "string") : [],
+      });
+      return answered();
+    }
     if (b.action === "resolve") {
       updateVoucher(number, { useResolved: true });
       return answered();

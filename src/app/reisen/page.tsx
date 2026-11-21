@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ChevronLeft, ChevronRight, FileUp, Plus } from "lucide-react";
 import { AppHeader } from "@/components/AppHeader";
 import { CopyCode } from "@/components/CopyCode";
+import { Toast } from "@/components/Toast";
 import { Button, Card, Input, Spinner } from "@/components/ui";
 import { BahnCards, CalendarSubscribe, Promos, Reminders, useAccount } from "@/components/trips/AccountPanel";
 import { STATUS, legColor, legLabel } from "@/components/trips/tripUi";
@@ -676,10 +677,32 @@ function Vouchers() {
       return null;
     }
   }
+  // the last changes, with each voucher as it was before → "Rückgängig"
+  const [undo, setUndo] = React.useState<{ before: Voucher[]; texts: Record<string, string> } | null>(null);
+  async function change(body: Record<string, unknown>, text: string) {
+    const was = list.find((v) => v.number === body.number);
+    if (!(await post(body)) || !was) return;
+    setUndo((u) => ({
+      // the first state of a voucher counts (ticked twice → back to the start)
+      before: [...(u?.before ?? []), ...(u?.before.some((v) => v.number === was.number) ? [] : [was])],
+      // per voucher only what it is now (ticked and unticked again → "wieder offen")
+      texts: { ...u?.texts, [was.number]: text },
+    }));
+  }
+  async function revert() {
+    const u = undo;
+    setUndo(null);
+    for (const v of u?.before ?? []) await post({ action: "restore", number: v.number, state: v });
+  }
+  // ticked while the toast shows: stays where it was, so the next one doesn't slide under the finger
+  const held = new Set((undo?.before ?? []).filter((v) => !v.redeemed).map((v) => v.number));
   const t = todayStr();
-  const openOnes = list.filter((v) => !v.redeemed && (!v.validUntil || v.validUntil >= t)).sort((a, b) => b.value - a.value);
+  const openOnes = list
+    .filter((v) => (!v.redeemed || held.has(v.number)) && (!v.validUntil || v.validUntil >= t))
+    .sort((a, b) => b.value - a.value || a.number.localeCompare(b.number));
   const done = list.filter((v) => !openOnes.includes(v)).sort((a, b) => b.receivedAt.localeCompare(a.receivedAt));
-  const sum = openOnes.reduce((x, v) => x + (v.value ?? 0), 0);
+  const stillOpen = openOnes.filter((v) => !v.redeemed);
+  const sum = stillOpen.reduce((x, v) => x + (v.value ?? 0), 0);
   const typed = form.number.trim().toUpperCase().replace(/\s+/g, "");
   const known = typed.length >= 5 ? list.find((v) => v.number === typed) : undefined;
   const orderLink = (o: string) =>
@@ -717,7 +740,11 @@ function Vouchers() {
         {v.autoRedeemed ? " · automatisch erkannt" : ""}
       </span>
       <label className="ml-auto flex items-center gap-1 text-xs">
-        <input type="checkbox" checked={v.redeemed} onChange={() => post({ action: "update", number: v.number, redeemed: !v.redeemed })} />{" "}
+        <input
+          type="checkbox"
+          checked={v.redeemed}
+          onChange={() => change({ action: "update", number: v.number, redeemed: !v.redeemed }, `${v.number} ${v.redeemed ? "wieder offen" : "als eingelöst markiert"}`)}
+        />{" "}
         eingelöst
       </label>
     </div>
@@ -726,9 +753,9 @@ function Vouchers() {
     <Card id="gutscheine" className="scroll-mt-20 p-3 sm:p-4">
       <button className="flex w-full flex-wrap items-baseline gap-x-3 gap-y-1 text-left text-sm" onClick={() => setOpen((o) => !o)}>
         <span className="font-semibold">Gutscheine</span>
-        {openOnes.length ? (
+        {stillOpen.length ? (
           <span>
-            <b>{formatEuro(sum)}</b> offen in {openOnes.length} {openOnes.length === 1 ? "Gutschein" : "Gutscheinen"}
+            <b>{formatEuro(sum)}</b> offen in {stillOpen.length} {stillOpen.length === 1 ? "Gutschein" : "Gutscheinen"}
           </span>
         ) : (
           <span className="text-muted-foreground">keine offenen</span>
@@ -747,11 +774,11 @@ function Vouchers() {
                   </p>
                   <div className="mt-1.5 flex flex-wrap gap-1.5">
                     {q.candidates.map((c) => (
-                      <Button key={c} size="sm" variant="outline" className="font-mono" onClick={() => post({ action: "used", number: c, order: q.orderNumber, replacedBy: q.rest })}>
+                      <Button key={c} size="sm" variant="outline" className="font-mono" onClick={() => change({ action: "used", number: c, order: q.orderNumber, replacedBy: q.rest }, `${c} als eingelöst markiert`)}>
                         {c}
                       </Button>
                     ))}
-                    <Button size="sm" variant="ghost" onClick={() => post({ action: "resolve", number: q.rest })}>
+                    <Button size="sm" variant="ghost" onClick={() => change({ action: "resolve", number: q.rest }, "Gemerkt: keiner davon")}>
                       keiner davon
                     </Button>
                   </div>
@@ -763,10 +790,10 @@ function Vouchers() {
                     <span className="font-mono">{q.voucher}</span>. Damit bezahlt?
                   </p>
                   <div className="mt-1.5 flex flex-wrap gap-1.5">
-                    <Button size="sm" variant="outline" onClick={() => post({ action: "used", number: q.voucher, order: q.orderNumber })}>
+                    <Button size="sm" variant="outline" onClick={() => change({ action: "used", number: q.voucher, order: q.orderNumber }, `${q.voucher} als eingelöst markiert`)}>
                       Ja, eingelöst
                     </Button>
-                    <Button size="sm" variant="ghost" onClick={() => post({ action: "notUsed", number: q.voucher, order: q.orderNumber })}>
+                    <Button size="sm" variant="ghost" onClick={() => change({ action: "notUsed", number: q.voucher, order: q.orderNumber }, `Gemerkt: nicht mit ${q.voucher} bezahlt`)}>
                       Nein
                     </Button>
                   </div>
@@ -840,6 +867,14 @@ function Vouchers() {
             </details>
           )}
         </div>
+      )}
+      {undo && (
+        <Toast
+          text={Object.values(undo.texts).join(" · ")}
+          action="Rückgängig"
+          onAction={revert}
+          onClose={() => setUndo(null)}
+        />
       )}
     </Card>
   );
