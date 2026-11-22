@@ -229,6 +229,10 @@ Gebucht ist ein günstiges Ticket mit hoher Flex-Chance, jetzt zählt der Tag se
   Zwischenhalte (einmal aus dem Fahrplan nachgeschlagen, ältere Fahrten über denselben Zug
   am gleichen Wochentag). Warst du auf einer anderen Strecke unterwegs (z. B. bei
   aufgehobener Zugbindung), suchst du unter „Anderer Bahnhof …“ jeden Bahnhof.
+- **Verbindung einfügen:** Kennt eine Fahrt nur ihr Ticket (z. B. Foto mit aufgehobener
+  Zugbindung), fügst du in der Fahrt den Text aus DB Navigator „Verbindung teilen“ ein –
+  Züge, Busse, Zeiten und Gleise werden übernommen, Notizen und Kontrollen hängen danach
+  am Zug zu ihrer Uhrzeit. Bei einer Fahrt mit Zügen heißt es „Verbindung ersetzen …“.
 - **Fahrgastrechte auf Knopfdruck:** Die App rechnet nach den Regeln der DB aus, was dir
   zusteht (25 % ab 60 min, 50 % ab 120 min, Erstattung bei Nichtantritt oder Abbruch). Sie
   erzeugt das **offizielle DB-Formular fertig ausgefüllt und unterschrieben** oder reicht den

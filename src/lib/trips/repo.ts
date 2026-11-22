@@ -413,6 +413,22 @@ export function updateEvent(
   return db.select().from(tripEvents).where(eq(tripEvents.id, id)).get() ?? null;
 }
 
+/**
+ * The trains of a trip, entered afterwards (e.g. "Verbindung teilen" pasted into a
+ * trip that only knew its ticket): new legs, events re-attached to the train at their time.
+ */
+export function replaceLegs(tripId: string, legs: TripLeg[]): TripDetail | null {
+  if (!legs.length) throw new Error("Verbindung ohne Abschnitte");
+  if (!updateTrip(tripId, { legs })) return null;
+  const t = db.select().from(trips).where(eq(trips.id, tripId)).get();
+  if (!t) return null;
+  for (const e of db.select().from(tripEvents).where(eq(tripEvents.tripId, tripId)).all()) {
+    const legIndex = legAt(t.legs, e.at);
+    if (legIndex !== e.legIndex) db.update(tripEvents).set({ legIndex }).where(eq(tripEvents.id, e.id)).run();
+  }
+  return getTrip(tripId);
+}
+
 export function setEventContext(id: string, context: TripEventRow["context"]): void {
   db.update(tripEvents).set({ context }).where(eq(tripEvents.id, id)).run();
 }

@@ -335,6 +335,14 @@ export default function TripPage() {
               <EventLine key={e.id} e={e} tripId={t.id} tripDays={tripDays} onDeleted={load} onEdit={() => setDialog({ event: e, type: e.type === "note" ? "note" : "control" })} />
             ))}
           </div>
+          <PasteConnection
+            tripId={t.id}
+            known={t.legs.some((l) => !!l.lineName)}
+            onDone={(n) => {
+              flash(`Verbindung übernommen: ${n} ${n === 1 ? "Abschnitt" : "Abschnitte"} mit Zeiten und Gleisen`);
+              load();
+            }}
+          />
           {screenshots.length > 0 && (
             <div className="mt-3 border-t border-border pt-2">
               <div className="mb-1 text-xs text-muted-foreground">Screenshots & Belege ({screenshots.length})</div>
@@ -473,6 +481,88 @@ export default function TripPage() {
 }
 
 /** Actual time next to a planned one: "+12" / "pünktlich" / "fällt aus". */
+/**
+ * "Verbindung teilen" from DB Navigator pasted in → the trip's trains. For a trip that
+ * only knew its ticket (Zugbindung aufgehoben, photo of the ticket), or to correct one.
+ */
+function PasteConnection({ tripId, known, onDone }: { tripId: string; known: boolean; onDone: (legs: number) => void }) {
+  const [open, setOpen] = React.useState(false);
+  const [text, setText] = React.useState("");
+  const [err, setErr] = React.useState<string | null>(null);
+  const [busy, setBusy] = React.useState(false);
+  async function save(value: string) {
+    if (known && !confirm("Die Züge dieser Fahrt durch die eingefügte Verbindung ersetzen?")) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const res = await fetch(`/api/trips/${tripId}/connection`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: value }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) return setErr(d.error ?? "Fehler");
+      setOpen(false);
+      setText("");
+      onDone(d.legs ?? 0);
+    } catch {
+      setErr("Keine Verbindung");
+    } finally {
+      setBusy(false);
+    }
+  }
+  if (!open)
+    return (
+      <div className={cn("mt-2", !known && "rounded-xl border border-dashed border-border p-2.5")}>
+        {!known && <p className="mb-1.5 text-xs text-muted-foreground">Welche Züge du genommen hast, steht noch nicht in der Fahrt.</p>}
+        <button type="button" className={cn("text-xs underline", known ? "text-muted-foreground" : "font-medium text-primary")} onClick={() => setOpen(true)}>
+          {known ? "Verbindung ersetzen …" : "Verbindung aus DB Navigator einfügen"}
+        </button>
+      </div>
+    );
+  return (
+    <div className="mt-2 space-y-2 rounded-xl border border-border p-2.5 text-sm">
+      <p className="text-xs text-muted-foreground">
+        In DB Navigator bei der Verbindung „Teilen“ → „Kopieren“, dann hier einfügen. Übernommen werden Züge, Busse, Zeiten und Gleise.
+      </p>
+      <textarea
+        className="h-36 w-full rounded-lg border border-border bg-background p-2 font-mono text-xs"
+        placeholder={"Bochum Hbf → Triberg\n17.11.2026\n\nICE 101\nNach …\nAb 6:00 Essen Hbf, Gleis 2\nAn 9:18 Baden-Baden, Gleis 7"}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        autoFocus
+      />
+      {err && <p className="text-xs text-danger">{err}</p>}
+      <div className="flex flex-wrap gap-2">
+        <Button size="sm" disabled={busy || !text.trim()} onClick={() => save(text)}>
+          Übernehmen
+        </Button>
+        {typeof navigator !== "undefined" && !!navigator.clipboard?.readText && (
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busy}
+            onClick={async () => {
+              try {
+                const v = await navigator.clipboard.readText();
+                setText(v);
+                if (v.trim()) save(v);
+              } catch {
+                setErr("Zwischenablage nicht lesbar – bitte ins Feld einfügen.");
+              }
+            }}
+          >
+            Aus Zwischenablage
+          </Button>
+        )}
+        <Button size="sm" variant="ghost" onClick={() => (setOpen(false), setErr(null))}>
+          Abbrechen
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function RtMark({
   planned,
   actual,
@@ -791,11 +881,15 @@ const OTHER = "__other__";
  * included (looked up once from the timetable), or any other station (searched)
  * — e.g. when the Zugbindung was lifted and another route was taken.
  */
+/** "Hornberg Bahnhof" (station search) is the stop "Hornberg" of the train. */
+const stationKey = (n: string) => n.replace(/[\s,]+$/, "").replace(/\s+(Bahnhof|Bf\.?)$/i, "").trim().toLowerCase();
+const sameStation = (a: string, b: string) => !!a && stationKey(a) === stationKey(b);
+
 function AbortStation({ tripId, legs, value, onChange }: { tripId: string; legs: Detail["legs"]; value: string; onChange: (v: string) => void }) {
   const [groups, setGroups] = React.useState(() => storedStations(legs));
   const [loading, setLoading] = React.useState(() => storedStations(legs).some((g) => g.complete === null));
   const known = React.useMemo(() => new Set(groups.flatMap((g) => g.stations)), [groups]);
-  const [other, setOther] = React.useState(() => !!value && !storedStations(legs).some((g) => g.stations.includes(value)));
+  const [other, setOther] = React.useState(() => !!value && !storedStations(legs).some((g) => g.stations.some((s) => sameStation(value, s))));
   const [hits, setHits] = React.useState<string[]>([]);
   React.useEffect(() => {
     if (!loading) return;
@@ -805,7 +899,7 @@ function AbortStation({ tripId, legs, value, onChange }: { tripId: string; legs:
       .then((d: { legs?: LegStationsView[] } | null) => {
         if (off || !d?.legs) return;
         setGroups(d.legs);
-        if (value && d.legs.some((g) => g.stations.includes(value))) setOther(false);
+        if (value && d.legs.some((g) => g.stations.some((s) => sameStation(value, s)))) setOther(false);
       })
       .catch(() => {})
       .finally(() => !off && setLoading(false));
@@ -834,7 +928,7 @@ function AbortStation({ tripId, legs, value, onChange }: { tripId: string; legs:
     <div className="flex flex-col gap-2">
       <select
         className="h-10 w-full min-w-0 max-w-full truncate rounded-xl border border-input bg-background px-3"
-        value={other ? OTHER : value}
+        value={other ? OTHER : ([...known].find((s) => s === value) ?? [...known].find((s) => sameStation(value, s)) ?? value)}
         onChange={(e) => {
           if (e.target.value === OTHER) {
             setOther(true);
