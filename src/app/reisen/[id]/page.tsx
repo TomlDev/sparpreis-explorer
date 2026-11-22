@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft, Camera, ChevronDown, FileDown, FileText, MapPin, Pencil, ShieldCheck, StickyNote, Trash2 } from "lucide-react";
 import { AppHeader } from "@/components/AppHeader";
+import { CopyCode } from "@/components/CopyCode";
 import { Button, Card, Input, Spinner } from "@/components/ui";
 import { EventDialog } from "@/components/trips/EventDialog";
 import { ForecastCard } from "@/components/trips/ForecastCard";
@@ -1545,6 +1546,8 @@ function OnlineClaim({ t, onDone, flash }: { t: Detail; onDone: () => void; flas
   const [returnUnused, setReturnUnused] = React.useState<boolean | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [err, setErr] = React.useState<string | null>(null);
+  // booked by someone else (not in the own DB account)
+  const [elsewhere, setElsewhere] = React.useState(false);
   React.useEffect(() => {
     fetch("/api/dbaccount")
       .then((r) => (r.ok ? r.json() : null))
@@ -1598,6 +1601,7 @@ function OnlineClaim({ t, onDone, flash }: { t: Detail; onDone: () => void; flas
               body: JSON.stringify({ confirm: true, ...(asksReturn ? { returnUnused } : {}) }),
             });
             const d = await res.json().catch(() => ({}));
+            setElsewhere(d.code === "not-in-account");
             if (!res.ok) setErr(d.error ?? "Einreichen fehlgeschlagen");
             else {
               flash(`Eingereicht – Fall-ID ${d.claim?.caseId ?? "?"}`);
@@ -1619,6 +1623,27 @@ function OnlineClaim({ t, onDone, flash }: { t: Detail; onDone: () => void; flas
         )}
       </Button>
       {err && <p className="text-sm text-danger">{err}</p>}
+      {elsewhere && (
+        <div className="space-y-1.5 rounded-xl border border-border bg-muted/40 p-2.5 text-xs">
+          <p className="font-medium text-foreground">Von jemand anderem gebucht? So geht es trotzdem:</p>
+          <ol className="list-decimal space-y-1 pl-4">
+            <li>
+              Auf bahn.de ohne Anmeldung die{" "}
+              <a href="https://www.bahn.de/faq/auftragssuche" target="_blank" rel="noreferrer" className="text-primary underline">
+                Auftragssuche
+              </a>{" "}
+              öffnen: Auftragsnummer <CopyCode code={t.orderNumber} className="inline-flex align-middle" /> und der Nachname der
+              <b> reisenden</b> Person (also deiner) – dann bei „Fahrgastrechte“ → „Entschädigung beantragen“. Die Angaben oben
+              (Strecke, Zeiten{type === "abgebrochen" ? ", Abbruchbahnhof" : ""}) einfach übernehmen.
+            </li>
+            <li>Oder unten „Formular ausgefüllt herunterladen“, unterschreiben und per Post schicken.</li>
+            <li>Oder die buchende Person stellt den Antrag in ihrem Konto – mit deinen Daten und deiner IBAN für die Auszahlung.</li>
+          </ol>
+          <p className="text-muted-foreground">
+            Hat der Arbeitgeber das Ticket bezahlt, kann ihm das Geld zustehen – im Zweifel kurz absprechen.
+          </p>
+        </div>
+      )}
     </div>
   );
 }

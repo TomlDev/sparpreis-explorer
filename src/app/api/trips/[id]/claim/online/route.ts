@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { ensureReady } from "@/lib/bootstrap";
-import { submitClaimOnline } from "@/lib/trips/dbClaim";
+import { OrderNotInAccountError, submitClaimOnline } from "@/lib/trips/dbClaim";
 import { getTrip } from "@/lib/trips/repo";
 
 export const runtime = "nodejs";
@@ -17,6 +17,8 @@ export async function POST(req: Request, { params }: Ctx) {
     const claim = await submitClaimOnline(id, { returnUnused: typeof b.returnUnused === "boolean" ? b.returnUnused : undefined });
     return NextResponse.json({ claim, trip: getTrip(id) });
   } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 400 });
+    // booked in someone else's account: the page shows the ways without it (order search, paper form)
+    const code = e instanceof OrderNotInAccountError ? "not-in-account" : undefined;
+    return NextResponse.json({ error: (e as Error).message, code }, { status: 400 });
   }
 }

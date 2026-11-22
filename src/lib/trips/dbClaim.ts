@@ -105,6 +105,13 @@ export function buildSubmission(i: OnlineClaimInput) {
   };
 }
 
+/** The order isn't in the user's DB account (booked by someone else / without login). */
+export class OrderNotInAccountError extends Error {
+  constructor() {
+    super("Die Buchung ist nicht in deinem DB-Konto (Auftragsnummer nicht gefunden).");
+  }
+}
+
 async function findOrder(nr: string, s: { orders: { auftraege?: DbOrder[] }; pastOrders: (i: number) => Promise<{ auftraege?: DbOrder[]; hasMoreAuftraege?: boolean }> }): Promise<DbOrder | null> {
   const hit = s.orders.auftraege?.find((o) => o.auftragsnummer === nr);
   if (hit) return hit;
@@ -139,7 +146,7 @@ export async function submitClaimOnline(tripId: string, opts: { returnUnused?: b
 
   const caseIds = await withDbSession(async (s) => {
     const order = await findOrder(trip.orderNumber!, s);
-    if (!order) throw new Error("Die Buchung ist nicht in deinem DB-Konto (Auftragsnummer nicht gefunden).");
+    if (!order) throw new OrderNotInAccountError();
     const g = (order.gesamtreisen ?? []).find((x) => x[dirKey]) ?? order.gesamtreisen?.[0];
     if (!g?.id) throw new Error("Reise in der Buchung nicht gefunden.");
     const detail = await s.getJson<DbOrderDetail>(`/web/api/buchung/auftrag/${encodeURIComponent(trip.orderNumber!)}?gesamtreiseId=${encodeURIComponent(g.id)}`);

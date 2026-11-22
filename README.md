@@ -237,7 +237,9 @@ Gebucht ist ein günstiges Ticket mit hoher Flex-Chance, jetzt zählt der Tag se
   zusteht (25 % ab 60 min, 50 % ab 120 min, Erstattung bei Nichtantritt oder Abbruch). Sie
   erzeugt das **offizielle DB-Formular fertig ausgefüllt und unterschrieben** oder reicht den
   Antrag **direkt online über dein DB-Konto** ein. Name, Adresse, IBAN und Zugangsdaten liegen
-  verschlüsselt auf dem Server.
+  verschlüsselt auf dem Server. Hat jemand anderes gebucht (Buchung nicht in deinem Konto),
+  zeigt die App die Wege ohne eigenes Konto: Auftragssuche auf bahn.de mit Auftragsnummer und
+  deinem Nachnamen, das Formular per Post oder den Antrag im Konto der buchenden Person.
 - **Alles verknüpft:** Auf jeder Fahrt steht oben der Stand des Antrags („Antrag offen ·
   11,20 € · Fall-ID“, „44,24 € erstattet“, „abgelehnt“) – ein Tipp springt direkt zum Antrag;
   dasselbe aus den Erinnerungen und der Fahrgastrechte-Liste. Die Reisen-Liste zeigt den
