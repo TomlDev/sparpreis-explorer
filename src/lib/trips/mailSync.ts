@@ -115,6 +115,17 @@ function client(cfg: MailConfig, acc: string): ImapFlow {
   return c;
 }
 
+/**
+ * Login of a mailbox for sending (server side only): the IMAP account's user and
+ * password; the SMTP server is the IMAP host with "smtp." in front (imap.x.de → smtp.x.de).
+ */
+export function mailLogin(acc = ""): { host: string; user: string; pass: string } | null {
+  const cfg = getMailConfig(acc);
+  const blob = getSetting<string>(PW(acc));
+  if (!cfg.host || !cfg.user || !blob) return null;
+  return { host: cfg.host.replace(/^(imap|mail)\./i, "smtp."), user: cfg.user, pass: decrypt(blob) };
+}
+
 /** imapflow errors → something a person can act on. */
 export function friendlyMailError(e: unknown): string {
   const err = e as Error & { authenticationFailed?: boolean; code?: string; responseText?: string };

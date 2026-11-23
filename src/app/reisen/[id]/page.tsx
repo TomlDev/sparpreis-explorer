@@ -3,7 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { ArrowLeft, Camera, ChevronDown, FileDown, FileText, MapPin, Pencil, ShieldCheck, StickyNote, Trash2 } from "lucide-react";
+import { ArrowLeft, Camera, ChevronDown, FileDown, FileText, Mail, MapPin, Pencil, ShieldCheck, StickyNote, Trash2 } from "lucide-react";
 import { AppHeader } from "@/components/AppHeader";
 import { CopyCode } from "@/components/CopyCode";
 import { Button, Card, Input, Spinner } from "@/components/ui";
@@ -1648,11 +1648,66 @@ function OnlineClaim({ t, onDone, flash }: { t: Detail; onDone: () => void; flas
   );
 }
 
+const CLAIM_MAIL_TO = "EUAntragFGR@deutschebahn.com";
+
+/** A PDF attachment page by page as images (an embedded PDF shows only its first page on iOS). Tap → the PDF. */
+function PdfPreview({ id }: { id: string }) {
+  const [pages, setPages] = React.useState<number | null>(null);
+  React.useEffect(() => {
+    let off = false;
+    fetch(`/api/attachments/${id}/preview?pages`)
+      .then((r) => (r.ok ? r.json() : { pages: 0 }))
+      .then((d) => !off && setPages(d.pages ?? 0))
+      .catch(() => !off && setPages(0));
+    return () => {
+      off = true;
+    };
+  }, [id]);
+  if (pages === null) return <Spinner />;
+  if (!pages)
+    return (
+      <a href={`/api/attachments/${id}`} target="_blank" rel="noreferrer" className="text-xs text-primary underline">
+        Formular öffnen
+      </a>
+    );
+  return (
+    <a href={`/api/attachments/${id}`} target="_blank" rel="noreferrer" className="block max-h-[70vh] space-y-2 overflow-y-auto rounded-lg bg-muted p-1.5">
+      {Array.from({ length: pages }, (_, i) => (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img key={i} src={`/api/attachments/${id}/preview?page=${i + 1}`} alt={`Seite ${i + 1}`} className="w-full rounded border border-border bg-white" loading="lazy" />
+      ))}
+    </a>
+  );
+}
+
 function ClaimBox({ t, ent, onDone }: { t: Detail; ent: NonNullable<ReturnType<typeof assess>>; onDone: () => void }) {
   const [extra, setExtra] = React.useState({ ticket: false, transport: false, overnight: false, other: false });
   const [reservation, setReservation] = React.useState(false);
   const [err, setErr] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
+  const [sending, setSending] = React.useState(false);
+  // the form made last (unsent draft) — shown below to check before it goes out
+  const draft = t.claims.find((c) => c.status === "draft" && !c.caseId);
+  const formId = draft?.notes ? (/Formular erzeugt \((att_[^)]+)\)/.exec(draft.notes)?.[1] ?? null) : null;
+  async function sendMail() {
+    if (!confirm(`Das Formular jetzt per E-Mail an die DB schicken (${CLAIM_MAIL_TO})? Du bekommst eine Kopie.`)) return;
+    setErr(null);
+    setSending(true);
+    try {
+      const res = await fetch(`/api/trips/${t.id}/claim/email`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirm: true }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) return setErr(d.error ?? "Senden fehlgeschlagen");
+      onDone();
+    } catch {
+      setErr("Keine Verbindung – bitte erneut versuchen.");
+    } finally {
+      setSending(false);
+    }
+  }
   return (
     <div className="space-y-2 text-sm">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -1672,7 +1727,7 @@ function ClaimBox({ t, ent, onDone }: { t: Detail; ent: NonNullable<ReturnType<t
         </p>
       ))}
       {!t.price && <p className="text-xs text-warning">Preis fehlt – oben bei „Ticketdaten“ eintragen, sonst kann die Höhe nicht berechnet werden.</p>}
-      {ent.payable && ent.journey && (
+      {ent.payable && ent.journey && !t.claims.some((c) => c.status !== "draft" || c.caseId) && (
         <>
           <details className="text-sm">
             <summary className="cursor-pointer text-muted-foreground">Zusatzkosten / Reservierung</summary>
@@ -1708,8 +1763,7 @@ function ClaimBox({ t, ent, onDone }: { t: Detail; ent: NonNullable<ReturnType<t
                 });
                 const d = await res.json().catch(() => ({}));
                 if (!res.ok) return setErr(d.error ?? "Fehler");
-                // Same-tab download (attachment): works on iOS Safari, unlike window.open after an await.
-                window.location.assign(`/api/attachments/${d.attachment.id}?download`);
+                // shown below (preview) with "Per E-Mail senden" / "Herunterladen"
                 onDone();
               } catch {
                 setErr("Keine Verbindung – bitte erneut versuchen.");
@@ -1718,13 +1772,33 @@ function ClaimBox({ t, ent, onDone }: { t: Detail; ent: NonNullable<ReturnType<t
               }
             }}
           >
-            {busy ? <Spinner /> : <FileDown className="h-4 w-4" />} Formular ausgefüllt herunterladen
+            {busy ? <Spinner /> : <FileText className="h-4 w-4" />} {formId ? "Formular neu erstellen" : "Formular ausfüllen"}
           </Button>
           <p className="text-xs text-muted-foreground">
             Offizielles DB-Fahrgastrechte-Formular mit deinen Daten und deiner Unterschrift aus den Einstellungen (ohne
-            gespeicherte Unterschrift: selbst unterschreiben). Per Post an „DB Fernverkehr AG, Servicecenter Fahrgastrechte, 60647
-            Frankfurt am Main“ schicken oder im Reisezentrum abgeben.
+            gespeicherte Unterschrift: ausdrucken und selbst unterschreiben). Danach erscheint es hier zum Prüfen – dann per E-Mail
+            an die DB, per Post an „DB Fernverkehr AG, Servicecenter Fahrgastrechte, 60647 Frankfurt am Main“ oder im Reisezentrum.
           </p>
+          {formId && (
+            <div className="space-y-2 rounded-xl border border-border p-2.5">
+              <p className="text-xs font-medium">So geht das Formular raus – bitte prüfen (Daten, Unterschrift):</p>
+              <PdfPreview id={formId} />
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" disabled={sending} onClick={sendMail}>
+                  {sending ? <Spinner /> : <Mail className="h-4 w-4" />} Per E-Mail an die DB senden
+                </Button>
+                <a href={`/api/attachments/${formId}?download`} className="inline-flex">
+                  <Button size="sm" variant="outline" type="button">
+                    <FileDown className="h-4 w-4" /> Herunterladen
+                  </Button>
+                </a>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Geht an {CLAIM_MAIL_TO} (die Mail-Adresse der DB für Fahrgastrechte-Anträge), Antworten an deine E-Mail aus den
+                Einstellungen, du bekommst eine Kopie. Belege für Zusatzkosten hängen nicht mit dran.
+              </p>
+            </div>
+          )}
           {err && (
             <p className="text-sm text-danger">
               {err}{" "}

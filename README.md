@@ -240,6 +240,11 @@ Gebucht ist ein günstiges Ticket mit hoher Flex-Chance, jetzt zählt der Tag se
   verschlüsselt auf dem Server. Hat jemand anderes gebucht (Buchung nicht in deinem Konto),
   zeigt die App die Wege ohne eigenes Konto: Auftragssuche auf bahn.de mit Auftragsnummer und
   deinem Nachnamen, das Formular per Post oder den Antrag im Konto der buchenden Person.
+- **Formular per E-Mail:** Das ausgefüllte, unterschriebene Formular erscheint nach dem Erstellen
+  Seite für Seite in der Fahrt zum Prüfen. Darunter schickt „Per E-Mail an die DB senden“ es an
+  die Antrags-Adresse der DB (EUAntragFGR@deutschebahn.com) – über das eingerichtete Postfach
+  (SMTP mit denselben Zugangsdaten), Antworten an deine E-Mail, du bekommst eine Kopie; der
+  Antrag steht danach auf „eingereicht“.
 - **Alles verknüpft:** Auf jeder Fahrt steht oben der Stand des Antrags („Antrag offen ·
   11,20 € · Fall-ID“, „44,24 € erstattet“, „abgelehnt“) – ein Tipp springt direkt zum Antrag;
   dasselbe aus den Erinnerungen und der Fahrgastrechte-Liste. Die Reisen-Liste zeigt den
