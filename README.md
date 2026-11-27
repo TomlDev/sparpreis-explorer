@@ -119,7 +119,9 @@ Gebucht ist ein günstiges Ticket mit hoher Flex-Chance, jetzt zählt der Tag se
   10 min die *Reisebegleitung* deiner Buchung – dieselben Angaben wie im DB Navigator:
   Zugbindung **aufgehoben/besteht**, Verbindung **fahrbar/nicht mehr fahrbar**, Alternative
   **möglich/nötig**. Dafür bleibt währenddessen ein bahn.de-Tab auf dem Server offen (kein
-  ständiges Neu-Anmelden). Jede Änderung landet mit Uhrzeit als **Beleg** an der Fahrt.
+  ständiges Neu-Anmelden). Jede Änderung landet mit Uhrzeit als **Beleg** an der Fahrt –
+  ein neuer Eintrag nur bei neuen Live-Daten, nicht mehr nach dem Reisetag. Von vielen
+  DB-Meldungen an einem Zug bleibt die neueste sichtbar, die früheren sind eingeklappt.
 - **Ohne DB-Konto schätzt die App selbst:** Unter 2 min zum Umsteigen gilt ein Anschluss als
   nicht erreichbar, ≥ 20 min am Ziel heben die Zugbindung auf. Zusätzlich sucht sie im
   DB-Live-Fahrplan die schnellste Weiterfahrt ab dem Bruchpunkt – sie sagt, wie spät du damit
@@ -215,7 +217,8 @@ Gebucht ist ein günstiges Ticket mit hoher Flex-Chance, jetzt zählt der Tag se
   ablaufende oben.
 - **Reserve-Buchung wird von selbst zum offenen Ticket:** Steht an einer Fahrt „Nehme ich
   nicht“ und hat die DB die Zugbindung aufgehoben (Änderungsmail oder DB-Konto), führt die
-  App sie nach dem Reisetag automatisch als „Ticket offen“ – mit Ablaufdatum und Erinnerung.
+  App sie ab der geplanten Abfahrt automatisch als „Ticket offen“ – mit Ablaufdatum und
+  Erinnerung. Fährst du doch noch am selben Tag damit: in der Fahrt „Damit gefahren …“.
 - **Mit dem Ticket später gefahren:** Ab 20 min angekündigter Verspätung darfst du laut DB
   auch an einem anderen Tag fahren (bis zu einem Jahr später). Die gebuchte Fahrt wird dann
   mit der tatsächlich gemachten verknüpft; Entschädigung gibt es pro Ticket nur einmal, für

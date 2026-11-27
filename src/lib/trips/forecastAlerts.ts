@@ -10,7 +10,9 @@ import { ticketSpan } from "./rules";
  * the today bar show it; notifications come from the DB app anyway.
  *  - a trip not marked "Nehme ich": Zugbindung lifted → time to pick another train;
  *  - a replacement journey: ≥ 60 min late → compensation.
- * Once per trip and step; again only when it gets clearly worse.
+ * Once per trip and step; again only when it gets clearly worse – and only on
+ * fresh live data (an old snapshot re-read later isn't news, and the replacement
+ * computed from "now" grows later by itself) and while the trip day isn't over.
  */
 
 interface Sent {
@@ -18,6 +20,8 @@ interface Sent {
   delay: number | null;
   reason: string | null;
   at: number;
+  /** the live data behind it — the same data again is nothing new */
+  seen?: number | null;
 }
 
 const KEY = "forecastAlerts";
@@ -26,12 +30,17 @@ const MAX_KEEP = 200;
 /** A trip whose Zugbindung matters to the user: not committed to this very train. */
 export const isFlexible = (t: Pick<TripRow, "status" | "plan" | "movedFrom">) => t.status === "planned" && t.plan !== "take" && !t.movedFrom;
 
-export function alertFor(t: TripRow, f: Forecast, prev: Sent | undefined): Sent | null {
+// the trip is over: no more news about it
+const OVER_AFTER_MS = 6 * 3_600_000;
+
+export function alertFor(t: TripRow, f: Forecast, prev: Sent | undefined, now = Date.now()): Sent | null {
   if (t.status !== "planned") return null;
+  if (t.plannedArrival && Date.parse(t.plannedArrival) + OVER_AFTER_MS < now) return null;
+  if (prev && f.at != null && prev.seen === f.at) return null;
   if (t.movedFrom) {
     if (f.delayMin == null || f.delayMin < 60) return null;
     if (prev && prev.kind === "claim" && f.delayMin - (prev.delay ?? 0) < 60) return null; // 120 min is the next step
-    return { kind: "claim", delay: f.delayMin, reason: f.reason, at: Date.now() };
+    return { kind: "claim", delay: f.delayMin, reason: f.reason, at: now, seen: f.at };
   }
   if (!isFlexible(t) || f.level !== "lifted") return null;
   if (prev?.kind === "lifted") {
@@ -39,7 +48,7 @@ export function alertFor(t: TripRow, f: Forecast, prev: Sent | undefined): Sent 
     const worse = f.delayMin != null ? prev.delay != null && f.delayMin - prev.delay >= 20 : prev.delay != null;
     if (!worse) return null;
   }
-  return { kind: "lifted", delay: f.delayMin, reason: f.reason, at: Date.now() };
+  return { kind: "lifted", delay: f.delayMin, reason: f.reason, at: now, seen: f.at };
 }
 
 export function checkForecastAlert(t: TripRow): void {

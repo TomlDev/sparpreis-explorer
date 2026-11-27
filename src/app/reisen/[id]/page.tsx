@@ -315,9 +315,13 @@ export default function TripPage() {
                   {!!l.rtLog?.length && <LiveLog leg={l} />}
                   {l.reservation && <span className="text-xs font-medium text-primary">Platz: {l.reservation}</span>}
                 </div>
-                {(eventsByLeg.get(i) ?? []).map((e) => (
-                  <EventLine key={e.id} e={e} tripId={t.id} tripDays={tripDays} onDeleted={load} onEdit={() => setDialog({ event: e, type: e.type === "note" ? "note" : "control" })} />
-                ))}
+                <EventList
+                  events={eventsByLeg.get(i) ?? []}
+                  tripId={t.id}
+                  tripDays={tripDays}
+                  onDeleted={load}
+                  onEdit={(e) => setDialog({ event: e, type: e.type === "note" ? "note" : "control" })}
+                />
                 {rtSum?.missed
                   .filter((m) => m.afterLeg === i)
                   .map((m) => (
@@ -332,9 +336,13 @@ export default function TripPage() {
               <span className="w-12 shrink-0 tabular-nums font-semibold">{formatTime(t.plannedArrival)}</span>
               <span className="font-semibold">{t.destName}</span>
             </div>
-            {loose.map((e) => (
-              <EventLine key={e.id} e={e} tripId={t.id} tripDays={tripDays} onDeleted={load} onEdit={() => setDialog({ event: e, type: e.type === "note" ? "note" : "control" })} />
-            ))}
+            <EventList
+              events={loose}
+              tripId={t.id}
+              tripDays={tripDays}
+              onDeleted={load}
+              onEdit={(e) => setDialog({ event: e, type: e.type === "note" ? "note" : "control" })}
+            />
           </div>
           <PasteConnection
             tripId={t.id}
@@ -705,6 +713,48 @@ function ControlContext({ c }: { c: NonNullable<TripEventRow["context"]> }) {
       )}
     </p>
   );
+}
+
+/** What the app noted by itself from DB's live data (forecast, Reisebegleitung, a connection breaking). */
+const isAutoEvent = (e: TripEventRow) =>
+  e.type === "delay" && /^(Prognose \(DB-Live-Daten|DB-Reisebegleitung \(|Anschluss in .+ platzt)/.test(e.text ?? "");
+
+/**
+ * A leg's entries. DB's live messages pile up during a disrupted trip – the
+ * newest stays, the ones before fold into "N frühere DB-Meldungen".
+ */
+function EventList({
+  events,
+  onEdit,
+  ...rest
+}: {
+  events: TripEventRow[];
+  tripId: string;
+  tripDays: string[];
+  onDeleted: () => void;
+  onEdit: (e: TripEventRow) => void;
+}) {
+  const [all, setAll] = React.useState(false);
+  const auto = events.filter(isAutoEvent);
+  const hidden = all || auto.length <= 2 ? new Set<string>() : new Set(auto.slice(0, -1).map((e) => e.id));
+  const line = (e: TripEventRow) => <EventLine key={e.id} e={e} {...rest} onEdit={() => onEdit(e)} />;
+  const toggle = (
+    <button
+      key="toggle"
+      type="button"
+      className="ml-12 block border-l-2 border-dashed border-border py-0.5 pl-3 text-left text-xs text-primary underline-offset-2 hover:underline"
+      onClick={() => setAll((x) => !x)}
+    >
+      {all ? "Frühere DB-Meldungen ausblenden" : `${auto.length - 1} frühere DB-Meldungen anzeigen`}
+    </button>
+  );
+  const out: React.ReactNode[] = [];
+  for (const e of events) {
+    // the toggle sits where the folded ones would start
+    if (auto.length > 2 && e.id === auto[0].id) out.push(toggle);
+    if (!hidden.has(e.id)) out.push(line(e));
+  }
+  return <>{out}</>;
 }
 
 function EventLine({

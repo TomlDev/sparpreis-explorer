@@ -172,14 +172,15 @@ export function listTrips(from: string, to: string): (TripRow & { claim: ClaimBr
 
 /**
  * A spare booking ("Nehme ich nicht") whose Zugbindung DB lifted (change mail or
- * the DB watch) becomes an open ticket once its day is over — usable for up to a
- * year (liftedUsableUntil), so it shows up in "Offene Tickets" with a reminder.
+ * the DB watch) becomes an open ticket once its train has left — usable for up to
+ * a year (liftedUsableUntil), so it shows up in "Offene Tickets" with a reminder.
+ * Taken later the same day after all → "Damit gefahren …" in the trip, as for any open ticket.
  */
-export function openSkippedTickets(today = formatInTimeZone(new Date(), TZ, "yyyy-MM-dd")): number {
+export function openSkippedTickets(now = new Date()): number {
   const due = db
     .select()
     .from(trips)
-    .where(and(eq(trips.status, "planned"), eq(trips.plan, "skip"), lt(trips.date, today)))
+    .where(and(eq(trips.status, "planned"), eq(trips.plan, "skip"), lt(trips.plannedDeparture, now.toISOString())))
     .all()
     .filter((t) => t.ticket?.scheduleChange?.zugbindungLifted || t.dbStatus?.zugbindung === "AUFGEHOBEN");
   for (const t of due) {
