@@ -124,8 +124,9 @@ Gebucht ist ein günstiges Ticket mit hoher Flex-Chance, jetzt zählt der Tag se
   DB-Meldungen an einem Zug bleibt die neueste sichtbar, die früheren sind eingeklappt.
 - **Ohne DB-Konto schätzt die App selbst:** Unter 2 min zum Umsteigen gilt ein Anschluss als
   nicht erreichbar, ≥ 20 min am Ziel heben die Zugbindung auf. Zusätzlich sucht sie im
-  DB-Live-Fahrplan die schnellste Weiterfahrt ab dem Bruchpunkt – sie sagt, wie spät du damit
-  ankommst.
+  DB-Live-Fahrplan die schnellste Weiterfahrt ab dem Bruchpunkt – gesucht ab dem Moment, in dem
+  du dort wärst (nicht ab jetzt), bis zwei Stunden nach der geplanten Ankunft – und sagt, wie spät
+  (oder wie viel früher) du damit ankommst.
 - **Ersatzverbindung wählen:** Ist die Zugbindung weg, zeigt die Fahrt-Seite die nächsten
   Verbindungen ab dem Start (unterwegs ab dem Bruchpunkt) mit Echtzeit, Anschluss-Quote und
   Flex-Chance. Ein Tipp auf **„Nehme ich“** trägt sie als verknüpfte Ersatzfahrt ein; die

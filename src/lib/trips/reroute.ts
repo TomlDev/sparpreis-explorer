@@ -19,6 +19,8 @@ import { isRailLeg } from "./rules";
  */
 
 const EVERY_MS = 10 * 60_000;
+/** "+12 min", "pünktlich", "60 min früher" – earlier than booked is said so, not "±0". */
+export const delayWords = (d: number | null) => (d == null ? "?" : d > 0 ? `+${d} min` : d === 0 ? "pünktlich" : `${-d} min früher`);
 const ms = (iso: string | null | undefined) => (iso ? new Date(iso).getTime() : NaN);
 
 /** Best arrival among DB's journeys (realtime where known), skipping cancelled ones. */
@@ -35,6 +37,20 @@ export function bestArrival(journeys: NormJourney[]): { arrival: string; via: st
   return best;
 }
 
+/**
+ * When you'd be at the break: the late train's arrival there (missed connection) or the
+ * planned departure of the cancelled train. Not "now": searched from now, the way on gets
+ * later by itself once that moment has passed (+60 … +330 min for a trip nobody was on).
+ */
+export function rerouteFrom(legs: TripRow["legs"], breakLeg: number): number | null {
+  const missed = missedConnections(legs).find((m) => m.nextLeg === breakLeg);
+  const at = ms(missed?.arrived ?? legs[breakLeg]?.plannedDeparture);
+  return Number.isFinite(at) ? at : null;
+}
+
+/** After this the trip is over – no more searching for a way on. */
+const OVER_MS = 2 * 3_600_000;
+
 export async function checkReroute(t: TripRow, now = Date.now()): Promise<RerouteCheck | null> {
   if (t.status !== "planned" && t.status !== "delayed") return null;
   const f = bookedForecast(t.legs);
@@ -48,9 +64,8 @@ export async function checkReroute(t: TripRow, now = Date.now()): Promise<Rerout
   const rail = t.legs.filter(isRailLeg);
   const dest = rail[rail.length - 1];
   if (!dest?.plannedArrival) return null;
-  // earliest you're at the break: the late train's arrival (missed) / its planned time (cancelled), not before now
-  const missed = missedConnections(t.legs).find((m) => m.nextLeg === f.breakAt!.legIndex);
-  const at = Math.max(now, ms(missed?.arrived ?? t.legs[f.breakAt.legIndex].plannedDeparture) || now);
+  if (now > ms(dest.plannedArrival) + OVER_MS) return prev ?? null;
+  const at = rerouteFrom(t.legs, f.breakAt.legIndex) ?? now;
   const resolve = async (id: string | null | undefined, name: string) => {
     if (id && /^\d{6,8}$/.test(id)) return id;
     addDbUsageToday(1);
@@ -81,7 +96,7 @@ export async function checkReroute(t: TripRow, now = Date.now()): Promise<Rerout
         at: now,
         text: `${f.reason} – Anschluss nicht erreichbar, Zugbindung aufgehoben. Schnellste Weiterfahrt ab ${check.from} (DB-Live-Fahrplan ${formatTime(new Date(now).toISOString())}): ${
           check.arrival
-            ? `${check.via}, an ${dest.toName} ${formatTime(check.arrival)} (${(check.delayMin ?? 0) > 0 ? `+${check.delayMin}` : "±0"} min)`
+            ? `${check.via}, an ${dest.toName} ${formatTime(check.arrival)} (${delayWords(check.delayMin)})`
             : "keine Verbindung gefunden"
         }`,
       });

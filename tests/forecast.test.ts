@@ -101,3 +101,19 @@ describe("Prognose vor / während der Fahrt", () => {
     expect(f.level).toBe("ok");
   });
 });
+
+describe("Weiterfahrt nach geplatztem Anschluss", () => {
+  it("wird ab der Ankunft am Bruchpunkt gesucht, nicht ab jetzt", async () => {
+    const { rerouteFrom, delayWords } = await import("@/lib/trips/reroute");
+    const T = (hm: string) => `2026-11-24T${hm}:00+01:00`;
+    const mk = (line: string, from: string, to: string, dep: string, arr: string): TripLeg => ({ lineName: line, product: "nationalExpress", fromName: from, toName: to, plannedDeparture: T(dep), plannedArrival: T(arr) });
+    // ICE 101 arrives Köln 06:59 instead of 06:48 → IC 2348 (06:53) missed
+    const legs = [
+      withRealtime(mk("ICE 101", "Essen Hbf", "Köln Hbf", "06:00", "06:48"), { live: { dep: T("06:05"), arr: T("06:59"), final: true, source: "live", checkedAt: 1 } }),
+      withRealtime(mk("IC 2348", "Köln Hbf", "Mannheim Hbf", "06:53", "09:21"), { live: { dep: T("06:53"), arr: T("09:25"), final: true, source: "live", checkedAt: 1 } }),
+    ];
+    expect(rerouteFrom(legs, 1)).toBe(Date.parse(T("06:59")));
+    expect(delayWords(-60)).toBe("60 min früher");
+    expect(delayWords(0)).toBe("pünktlich");
+  });
+});

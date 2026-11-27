@@ -49,7 +49,7 @@ function decide(f: Forecast, reroute: RerouteCheck | null | undefined): Forecast
   return {
     ...lifted,
     delayMin: d,
-    reason: `${f.reason} · Ersatz ab ${reroute.from}${reroute.via ? ` (${reroute.via})` : ""}: ${d > 0 ? `+${d} min` : "pünktlich"} am Ziel`,
+    reason: `${f.reason} · Ersatz ab ${reroute.from}${reroute.via ? ` (${reroute.via})` : ""}: ${d > 0 ? `+${d} min` : d < 0 ? `${-d} min früher` : "pünktlich"} am Ziel`,
   };
 }
 
