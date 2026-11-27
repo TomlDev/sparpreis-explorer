@@ -154,7 +154,7 @@ const PLATFORM_PREFIX = /^(\d{1,2}[a-z]?(?:\/[a-z])?(?:\s+[A-G](?:-[A-G])?)?)\s+
 const NOTE = /Res\.-Nr\.|\bSitzpl|Wg\.\s*\d|Großraum|Ruhebereich|Fenster|\bGang\b|Abteil|\bHandy\b|Fahrkarte|erforderlich|Ticketcode|Seite \d+ \/ \d+|Reservierungspflicht/i;
 const NOTE_START = /\s+(?:\d+ Sitzpl|Die Fahrkarte|Reservierung|Wg\.\s*\d)/;
 
-/** Wrapped station names: "Gütenbach Neueck, Triberg" + "im Schwarzwald",
+/** Wrapped station names: "Rathaus, Triberg" + "im Schwarzwald",
  *  "Bahnhof, Gutach im" + "Breisgau", "Altenessen Bahnhof, Essen" + "(Ruhr)". */
 function stationNames(lines: string[]): [string, string] {
   const groups: string[] = [];
