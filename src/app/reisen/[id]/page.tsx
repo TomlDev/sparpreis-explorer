@@ -55,7 +55,7 @@ const berlinIso = berlinToIso;
 const deDay = (d: string) => new Date(`${d}T12:00:00Z`).toLocaleDateString("de-DE");
 const berlinDate = (iso: string) => berlinDay(iso);
 
-/** "Gütenbach Neueck, Furtwangen im Schwarzwald" → "Gütenbach Neueck" (stop before the town). */
+/** "Rathaus, Triberg im Schwarzwald" → "Rathaus" (stop before the town). */
 const placeOnly = (name: string) => name.split(",")[0].trim() || name;
 
 const isChangeNote = (e: TripEventRow) => e.type === "note" && /^Fahrplanänderung/.test(e.text ?? "");
@@ -243,7 +243,7 @@ export default function TripPage() {
         <Card className="p-3 sm:p-4">
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
-              {/* "Gütenbach Neueck, Furtwangen im Schwarzwald" → "Gütenbach Neueck": the full names are in the connection below */}
+              {/* "Rathaus, Triberg im Schwarzwald" → "Rathaus": the full names are in the connection below */}
               <h1 className="text-base font-semibold leading-snug sm:text-lg" title={`${t.originName} → ${t.destName}`}>
                 {placeOnly(t.originName)} → {placeOnly(t.destName)}
               </h1>
