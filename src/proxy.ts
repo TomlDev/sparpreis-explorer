@@ -3,7 +3,7 @@ import { SESSION_COOKIE, verifySessionToken } from "@/lib/auth";
 
 // /api/calendar/<token>.ics is checked by its own (long, random) token —
 // calendar apps can't log in.
-const PUBLIC_PATHS = ["/login", "/api/auth/login", "/api/health", "/api/calendar"];
+const PUBLIC_PATHS = ["/login", "/sso", "/api/auth/login", "/api/health", "/api/calendar"];
 
 export async function proxy(req: NextRequest) {
   const { pathname, search } = req.nextUrl;

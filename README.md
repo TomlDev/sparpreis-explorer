@@ -132,6 +132,10 @@ Gebucht ist ein günstiges Ticket mit hoher Flex-Chance, jetzt zählt der Tag se
   Live-Verfolgung läuft dort weiter. Kommt auch die Ersatzfahrt ≥ 60 min zu spät, gibt es
   dafür die Entschädigung.
 
+- **Aus dem Home-Portal angemeldet öffnen:** Die Kachel „Sparpreis-Explorer“ im Home-Portal
+  öffnet die App über `/sso` gleich angemeldet (Einmal-Token, 60 s gültig, nur einmal
+  verwendbar; gleiches `SSO_SECRET` in beiden `.env`). Ohne `SSO_SECRET` ist `/sso` aus.
+
 ## Was die App sonst kann
 
 **Günstige Tickets finden**
