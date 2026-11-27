@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { competing, planStates, type PlanTrip } from "@/lib/trips/plan";
+import { competing, journeyGroups, planStates, type PlanTrip } from "@/lib/trips/plan";
 
 const trip = (id: string, dep: string, arr: string, o: Partial<PlanTrip> = {}): PlanTrip => ({
   id,
@@ -40,5 +40,15 @@ describe("trip plan", () => {
 
   it("a single trip without a mark has no plan state", () => {
     expect(planStates([trip("a", "08:00", "14:00")]).get("a")).toEqual({ state: null, implied: false, rivals: [] });
+  });
+
+  it("Doppelbuchung derselben Fahrt → ein Eintrag, die genommene zuerst", () => {
+    const g = journeyGroups([
+      trip("spare", "05:34", "11:42", { plan: "skip" }),
+      trip("main", "05:34", "12:42", { plan: "take" }),
+      trip("back", "15:39", "21:00", { originName: "Triberg", destName: "Bochum Hbf" }),
+      trip("other", "06:00", "10:00", { destName: "Freiburg" }),
+    ]);
+    expect(g.map((x) => x.map((t) => t.id))).toEqual([["main", "spare"], ["back"], ["other"]]);
   });
 });

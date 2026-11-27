@@ -202,7 +202,15 @@ Gebucht ist ein günstiges Ticket mit hoher Flex-Chance, jetzt zählt der Tag se
   nachträglich ändert.
 - **Doppelt gebucht?** Überschneiden sich zwei Fahrten zeitlich, steht „Doppelt gebucht“
   daran; bis du entscheidest, sind beide normale Fahrten. „✓ Nehme ich“ macht die andere zur
-  ausgegrauten Reserve, „✗ Nehme ich nicht“ geht auch für beide.
+  ausgegrauten Reserve, „✗ Nehme ich nicht“ geht auch für beide. Zwei Buchungen derselben
+  Fahrt (gleicher Tag, Start und Ziel) stehen in der Liste als **ein Eintrag** mit beiden
+  Aufträgen; ein Tipp öffnet die genommene, oben auf der Fahrt-Seite wechselst du zur anderen.
+- **Fahrten als Zeitleiste:** Jede Fahrt in der Liste zeigt ihre Züge als farbigen Balken –
+  jeder Abschnitt so lang, wie der Zug fährt (ICE rot, Regio grau, S-Bahn grün, Bus lila),
+  die Zugnamen darunter, dazu Status und Umstiege in Worten.
+- **Alles klappbar:** Jeder Abschnitt unter „Meine Reisen“ (nächste Fahrt, Kalender, Fahrten
+  im Monat, Erinnerungen, Fahrgastrechte, BahnCard, offene Tickets, Gutscheine, Aktionen,
+  Kalender-Abo) lässt sich einklappen; der Zustand bleibt in diesem Browser gespeichert.
 - **Was deckt das Ticket ab?** Aus dem Geltungsbereich der Buchung („Bochum+City →
   Freiburg“) markiert die Fahrt-Seite jeden Abschnitt: im Ticket, per **City-Ticket**
   abgedeckt (z. B. die Straßenbahn zum Bahnhof) oder **nicht im Ticket** – dann braucht es

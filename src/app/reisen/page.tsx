@@ -6,12 +6,14 @@ import { ChevronLeft, ChevronRight, FileUp, Plus } from "lucide-react";
 import { AppHeader } from "@/components/AppHeader";
 import { CopyCode } from "@/components/CopyCode";
 import { Toast } from "@/components/Toast";
+import { Chevron, FoldHeading, useStoredOpen } from "@/components/Collapsible";
 import { Button, Card, Input, Spinner } from "@/components/ui";
 import { BahnCards, CalendarSubscribe, Promos, Reminders, useAccount } from "@/components/trips/AccountPanel";
-import { STATUS, legColor, legLabel } from "@/components/trips/tripUi";
+import { STATUS } from "@/components/trips/tripUi";
 import type { TripRow } from "@/db/schema";
 import type { ClaimBrief } from "@/lib/trips/repo";
-import { planStates, type PlanInfo } from "@/lib/trips/plan";
+import { journeyGroups, planStates, type PlanInfo } from "@/lib/trips/plan";
+import { TripTimeline } from "@/components/trips/TripTimeline";
 import { liftedUsableUntil } from "@/lib/trips/rules";
 import { berlinToIso, formatTime } from "@/lib/time";
 import { cn, formatEuro } from "@/lib/utils";
@@ -142,6 +144,8 @@ export default function TripsPage() {
   const monthTrips = trips.filter((t) => t.date >= b.from && t.date <= b.to);
   const rest = monthTrips.filter((t) => !nextIds.includes(t.id));
   const title = new Date(Date.UTC(b.y, b.m - 1, 15)).toLocaleDateString("de-DE", { month: "long", year: "numeric" });
+  const cal = useStoredOpen("calendarGrid", true);
+  const monthList = useStoredOpen("monthTrips", true);
 
   return (
     <>
@@ -199,10 +203,17 @@ export default function TripsPage() {
             <button className="font-semibold" onClick={() => setMonth(today.slice(0, 7))} title="Zum aktuellen Monat">
               {title}
             </button>
-            <Button variant="ghost" size="icon" onClick={() => setMonth((m) => shiftMonth(m, 1))} aria-label="Nächster Monat">
-              <ChevronRight className="h-5 w-5" />
-            </Button>
+            <div className="flex items-center">
+              <Button variant="ghost" size="icon" onClick={() => setMonth((m) => shiftMonth(m, 1))} aria-label="Nächster Monat">
+                <ChevronRight className="h-5 w-5" />
+              </Button>
+              <Button variant="ghost" size="icon" onClick={cal.toggle} aria-expanded={cal.open} aria-label={cal.open ? "Kalender einklappen" : "Kalender aufklappen"}>
+                <Chevron open={cal.open} />
+              </Button>
+            </div>
           </div>
+          {cal.open && (
+          <>
           <div className="grid grid-cols-7 gap-1 text-center text-xs text-muted-foreground">
             {WEEKDAYS.map((w) => (
               <div key={w}>{w}</div>
@@ -251,13 +262,16 @@ export default function TripsPage() {
               );
             })}
           </div>
+          </>
+          )}
         </Card>
 
         <div className="space-y-2">
           {rest.length > 0 && (
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+            <FoldHeading open={monthList.open} onToggle={monthList.toggle}>
               {rest.length < monthTrips.length ? "Weitere Fahrten" : "Fahrten"} im {title}
-            </h2>
+              {!monthList.open && <span className="ml-1.5 font-normal normal-case">({journeyGroups(rest).length})</span>}
+            </FoldHeading>
           )}
           {monthTrips.length === 0 && (
             <p className="text-sm text-muted-foreground">
@@ -265,8 +279,8 @@ export default function TripsPage() {
               Fahrt eintragen.
             </p>
           )}
-          {rest.map((t) => (
-            <TripCard key={t.id} t={t} plan={plans.get(t.id)} onChanged={load} />
+          {monthList.open && journeyGroups(rest).map((g) => (
+            <TripCard key={g[0].id} group={g} plans={plans} onChanged={load} />
           ))}
         </div>
 
@@ -299,83 +313,116 @@ function claimChip(c: ClaimBrief): { text: string; cls: string } {
   return { text: "Antrag nicht eingereicht", cls: "bg-muted text-muted-foreground" };
 }
 
-function TripCard({ t, plan, onChanged }: { t: TripRow & { claim?: ClaimBrief | null }; plan?: PlanInfo; onChanged?: () => void }) {
+type ListTrip = TripRow & { claim?: ClaimBrief | null };
+
+const shortDate = (d: string) => {
+  const x = new Date(`${d}T12:00:00Z`);
+  return `${x.toLocaleDateString("de-DE", { weekday: "short", timeZone: "UTC" }).replace(".", "")} ${x.getUTCDate()}.${x.getUTCMonth() + 1}.`;
+};
+const textOf = (cls: string | undefined) => cls?.split(" ").find((c) => c.startsWith("text-")) ?? "";
+
+/** What a booking's state says, as short coloured words (no boxes). */
+// "journey": what is about the trains (same for every booking of it); "booking": what is about this ticket
+function stateWords(t: ListTrip, plan: PlanInfo | undefined, part: "all" | "journey" | "booking" = "all") {
   const state = t.status === "planned" ? (plan?.state ?? null) : null;
+  const w: { text: string; cls: string }[] = [];
+  if (part !== "journey") w.push({ text: STATUS[t.status]?.label ?? t.status, cls: t.status === "planned" ? "text-muted-foreground" : textOf(STATUS[t.status]?.cls) });
+  if (part !== "booking") {
+    if (t.ticket?.scheduleChange?.zugbindungLifted) w.push({ text: "Zugbindung aufgehoben", cls: "text-warning" });
+    else if (t.ticket?.scheduleChange) w.push({ text: "Fahrplan geändert", cls: "text-warning" });
+  }
+  if (part === "journey") return w;
+  if (t.claim) w.push({ text: claimChip(t.claim).text, cls: textOf(claimChip(t.claim).cls) });
+  if (t.movedFrom) w.push({ text: "🔁 Ersatzfahrt", cls: "text-primary" });
+  if (state === "take" && !plan?.implied) w.push({ text: "✓ Nehme ich", cls: "text-success" });
+  if (state === "skip") w.push({ text: "Nehme ich nicht", cls: "text-muted-foreground" });
+  if (state === "open") w.push({ text: "Doppelt gebucht", cls: "text-warning" });
+  return w;
+}
+
+function PlanButtons({ id, onChanged }: { id: string; onChanged?: () => void }) {
+  const b = (plan: "take" | "skip", label: string, cls: string) => (
+    <button
+      type="button"
+      className={cn("rounded border px-1.5 py-0.5 text-[11px] font-semibold", cls)}
+      onClick={async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        await setPlan(id, plan);
+        onChanged?.();
+      }}
+    >
+      {label}
+    </button>
+  );
+  return (
+    <>
+      {b("take", "✓ Die nehme ich", "border-success text-success hover:bg-success/10")}
+      {b("skip", "✗ Nehme ich nicht", "border-border text-muted-foreground hover:bg-muted")}
+    </>
+  );
+}
+
+/**
+ * One journey: date, route, the trains as a bar (each as long as it runs, names
+ * below), state in words. Bookings of the same journey (a spare) are one card –
+ * it opens the one taken, the trip page switches between them.
+ */
+function TripCard({ group, plans, onChanged }: { group: ListTrip[]; plans: Map<string, PlanInfo>; onChanged?: () => void }) {
+  const t = group[0];
+  const many = group.length > 1;
+  const plan = plans.get(t.id);
+  const words = stateWords(t, plan, many ? "journey" : "all");
+  const changes = t.legs.filter((l) => !l.isWalking).length - 1;
+  const skipped = !many && t.status === "planned" && plan?.state === "skip";
+  const open = group.some((x) => x.status === "planned" && plans.get(x.id)?.state === "open");
   return (
     <Link href={`/reisen/${t.id}`} className="block">
-      <Card className={cn("flex items-center gap-3 p-3 hover:bg-muted/40", state === "skip" && "opacity-60", state === "open" && "border-warning")}>
-        <div className="w-24 shrink-0 text-sm">
-          <div className="font-semibold">
-            {new Date(`${t.date}T12:00:00Z`).toLocaleDateString("de-DE", {
-              weekday: "short",
-              day: "numeric",
-              month: "short",
+      <Card className={cn("space-y-1.5 p-3 hover:bg-muted/40", skipped && "opacity-60", open && "border-warning")}>
+        <div className="flex items-baseline gap-2 text-sm">
+          <span className="shrink-0 font-semibold">{shortDate(t.date)}</span>
+          <span className="min-w-0 flex-1 truncate font-medium">
+            {t.originName} → {t.destName}
+          </span>
+          <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+            {many ? `${group.length} Buchungen` : t.price != null ? formatEuro(t.price) : ""}
+          </span>
+        </div>
+        {t.plannedDeparture && t.plannedArrival ? (
+          <TripTimeline legs={t.legs} from={t.plannedDeparture} to={t.plannedArrival} />
+        ) : (
+          <div className="text-xs text-muted-foreground">Zeit unbekannt</div>
+        )}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-semibold">
+          {words.map((w) => (
+            <span key={w.text} className={w.cls}>
+              {w.text}
+            </span>
+          ))}
+          {!many && plan?.state === "open" && t.status === "planned" && <PlanButtons id={t.id} onChanged={onChanged} />}
+          {changes > 0 && <span className="ml-auto whitespace-nowrap font-normal text-muted-foreground">{changes}× umsteigen</span>}
+        </div>
+        {many && (
+          <div className="space-y-1 text-xs">
+            {group.map((x) => {
+              const p = plans.get(x.id);
+              return (
+                <div key={x.id} className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <span className="tabular-nums text-muted-foreground">
+                    {x.orderNumber ? `Auftrag …${x.orderNumber.slice(-4)}` : "Buchung"}
+                    {x.price != null ? ` · ${formatEuro(x.price)}` : ""}
+                  </span>
+                  {stateWords(x, p, "booking").map((w) => (
+                    <span key={w.text} className={cn("font-semibold", w.cls)}>
+                      {w.text}
+                    </span>
+                  ))}
+                  {p?.state === "open" && x.status === "planned" && <PlanButtons id={x.id} onChanged={onChanged} />}
+                </div>
+              );
             })}
           </div>
-          <div className="tabular-nums text-xs text-muted-foreground">
-            {t.plannedDeparture ? `${formatTime(t.plannedDeparture)}–${formatTime(t.plannedArrival)}` : "Zeit unbekannt"}
-          </div>
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-medium">
-            {t.originName} → {t.destName}
-          </div>
-          <div className="mt-1 flex flex-wrap gap-1">
-            {t.legs
-              .filter((l) => !l.isWalking && (l.product || l.lineName))
-              .map((l, i) => (
-                <span key={i} className={cn("rounded px-1.5 py-0.5 text-[10px] font-semibold", legColor(l))}>
-                  {legLabel(l)}
-                </span>
-              ))}
-            {t.ticket?.scheduleChange?.zugbindungLifted ? (
-              <span className="rounded bg-warning/15 px-1.5 py-0.5 text-[10px] font-semibold text-warning">Zugbindung aufgehoben</span>
-            ) : t.ticket?.scheduleChange ? (
-              <span className="rounded bg-warning/15 px-1.5 py-0.5 text-[10px] font-semibold text-warning">Fahrplan geändert</span>
-            ) : null}
-            {t.claim && (
-              <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-semibold", claimChip(t.claim).cls)}>{claimChip(t.claim).text}</span>
-            )}
-            {t.movedFrom && <span className="rounded bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold text-primary">🔁 Ersatzfahrt</span>}
-            {state === "take" && !plan?.implied && (
-              <span className="rounded bg-success/15 px-1.5 py-0.5 text-[10px] font-semibold text-success">✓ Nehme ich</span>
-            )}
-            {state === "skip" && <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-semibold">Nehme ich nicht</span>}
-            {state === "open" && (
-              <>
-                <span className="rounded bg-warning/15 px-1.5 py-0.5 text-[10px] font-semibold text-warning">Doppelt gebucht</span>
-                <button
-                  type="button"
-                  className="rounded border border-success px-1.5 py-0.5 text-[10px] font-semibold text-success hover:bg-success/10"
-                  onClick={async (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    await setPlan(t.id, "take");
-                    onChanged?.();
-                  }}
-                >
-                  ✓ Die nehme ich
-                </button>
-                <button
-                  type="button"
-                  className="rounded border border-border px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground hover:bg-muted"
-                  onClick={async (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    await setPlan(t.id, "skip");
-                    onChanged?.();
-                  }}
-                >
-                  ✗ Nehme ich nicht
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-        <div className="flex shrink-0 flex-col items-end gap-1">
-          <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-medium", STATUS[t.status]?.cls)}>{STATUS[t.status]?.label ?? t.status}</span>
-          {t.price != null && <span className="text-xs text-muted-foreground">{formatEuro(t.price)}</span>}
-        </div>
+        )}
       </Card>
     </Link>
   );
@@ -383,8 +430,9 @@ function TripCard({ t, plan, onChanged }: { t: TripRow & { claim?: ClaimBrief | 
 
 /** The next trip from today on — independent of the month shown. */
 function NextTrips({ onShown, onChanged }: { onShown: (ids: string[]) => void; onChanged: () => void }) {
-  const [list, setList] = React.useState<TripRow[] | null>(null);
+  const [list, setList] = React.useState<TripRow[][] | null>(null);
   const [plans, setPlans] = React.useState<Map<string, PlanInfo>>(new Map());
+  const { open, toggle } = useStoredOpen("nextTrip", true);
   React.useEffect(() => {
     const from = todayStr();
     const to = new Date(Date.now() + 365 * 86_400_000).toLocaleDateString("sv-SE", { timeZone: "Europe/Berlin" });
@@ -402,17 +450,26 @@ function NextTrips({ onShown, onChanged }: { onShown: (ids: string[]) => void; o
             plans.get(t.id)?.state !== "skip" &&
             (!t.plannedArrival || new Date(t.plannedArrival).getTime() > now - 3600_000),
         );
-        setList(up.slice(0, 1));
-        onShown(up.slice(0, 1).map((t) => t.id));
+        // with its spare booking(s), as in the month list
+        const g = up.length ? journeyGroups(all).filter((g) => g.some((t) => t.id === up[0].id)) : [];
+        setList(g);
+        onShown(g.flat().map((t) => t.id));
       })
       .catch(() => setList([]));
   }, [onShown]);
   if (!list?.length) return null;
   return (
     <div className="space-y-2">
-      <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Nächste Fahrt</h2>
-      {list.map((t) => (
-        <TripCard key={t.id} t={t} plan={plans.get(t.id)} onChanged={onChanged} />
+      <FoldHeading open={open} onToggle={toggle}>
+        Nächste Fahrt
+        {!open && list[0]?.[0] && (
+          <span className="ml-1.5 font-normal normal-case">
+            {shortDate(list[0][0].date)} {formatTime(list[0][0].plannedDeparture)} → {list[0][0].destName}
+          </span>
+        )}
+      </FoldHeading>
+      {open && list.map((g) => (
+        <TripCard key={g[0].id} group={g} plans={plans} onChanged={onChanged} />
       ))}
     </div>
   );
@@ -500,7 +557,7 @@ const CLAIM_LABEL: Record<string, string> = { draft: "Formular erstellt", submit
 /** Passenger-rights overview: money received, open and rejected claims. */
 function ClaimsSummary() {
   const [d, setD] = React.useState<ClaimsOverview | null>(null);
-  const [open, setOpen] = React.useState(false);
+  const { open, toggle } = useStoredOpen("claims", false);
   React.useEffect(() => {
     fetch("/api/claims")
       .then((r) => (r.ok ? r.json() : null))
@@ -510,13 +567,16 @@ function ClaimsSummary() {
   if (!d || d.claims.length === 0) return null;
   return (
     <Card className="p-3 sm:p-4">
-      <button className="flex w-full flex-wrap items-baseline gap-x-3 gap-y-1 text-left text-sm" onClick={() => setOpen((o) => !o)}>
+      <button className="flex w-full flex-wrap items-baseline gap-x-3 gap-y-1 text-left text-sm" onClick={toggle}>
         <span className="font-semibold">Fahrgastrechte</span>
         <span className="font-semibold text-success">{formatEuro(d.paidTotal)} erstattet</span>
         {d.pending > 0 && <span>{d.pending} offen</span>}
         {d.drafts > 0 && <span className="text-muted-foreground">{d.drafts} noch nicht eingereicht</span>}
         {d.rejected > 0 && <span className="text-danger">{d.rejected} abgelehnt</span>}
-        <span className="ml-auto text-xs text-muted-foreground">{open ? "ausblenden" : `${d.claims.length} Anträge anzeigen`}</span>
+        <span className="ml-auto flex items-center gap-1 self-center text-xs text-muted-foreground">
+          {!open && `${d.claims.length} Anträge`}
+          <Chevron open={open} />
+        </span>
       </button>
       {open && (
         <div className="mt-2 divide-y divide-border text-sm">
@@ -544,7 +604,7 @@ function ClaimsSummary() {
 /** Tickets not used yet (Zugbindung lifted): usable up to a year after their travel day – any month. */
 function OpenTickets() {
   const [list, setList] = React.useState<TripRow[] | null>(null);
-  const [open, setOpen] = React.useState(true);
+  const { open, toggle } = useStoredOpen("openTickets", true);
   React.useEffect(() => {
     fetch("/api/trips?status=lifted")
       .then((r) => (r.ok ? r.json() : null))
@@ -583,7 +643,7 @@ function OpenTickets() {
   };
   return (
     <Card className="p-3 sm:p-4">
-      <button className="flex w-full flex-wrap items-baseline gap-x-3 gap-y-1 text-left text-sm" onClick={() => setOpen((o) => !o)}>
+      <button className="flex w-full flex-wrap items-baseline gap-x-3 gap-y-1 text-left text-sm" onClick={toggle}>
         <span className="font-semibold">Offene Tickets</span>
         {valid.length ? (
           <span>
@@ -592,7 +652,7 @@ function OpenTickets() {
         ) : (
           <span className="text-muted-foreground">keine mehr nutzbar</span>
         )}
-        <span className="ml-auto text-xs text-muted-foreground">{open ? "ausblenden" : "anzeigen"}</span>
+        <Chevron open={open} className="ml-auto self-center" />
       </button>
       {open && (
         <div className="mt-2 text-sm">
@@ -636,10 +696,10 @@ function Vouchers() {
   const [questions, setQuestions] = React.useState<VoucherQuestion[]>([]);
   // order number → trip (links "Rest aus Auftrag …" / "eingesetzt für Auftrag …")
   const [tripOf, setTripOf] = React.useState<Record<string, string>>({});
-  const [open, setOpen] = React.useState(false);
+  const { open, toggle, show } = useStoredOpen("vouchers", false);
   // opened via "Verwalten" in the search's voucher card (runs before the page rewrites the URL)
   React.useEffect(() => {
-    if (window.location.hash === "#gutscheine") setOpen(true);
+    if (window.location.hash === "#gutscheine") show();
   }, []);
   // date preset to a year from today; untouched it isn't sent, so a known number keeps its own
   const blank = () => ({ number: "", value: "", validUntil: inOneYear(), dateSet: false });
@@ -653,7 +713,7 @@ function Vouchers() {
         setList(d?.vouchers ?? []);
         setQuestions(d?.questions ?? []);
         setTripOf(d?.trips ?? {});
-        if (d?.questions?.length) setOpen(true);
+        if (d?.questions?.length) show();
         if (window.location.hash === "#gutscheine")
           requestAnimationFrame(() => document.getElementById("gutscheine")?.scrollIntoView({ block: "start" }));
       })
@@ -751,7 +811,7 @@ function Vouchers() {
   );
   return (
     <Card id="gutscheine" className="scroll-mt-20 p-3 sm:p-4">
-      <button className="flex w-full flex-wrap items-baseline gap-x-3 gap-y-1 text-left text-sm" onClick={() => setOpen((o) => !o)}>
+      <button className="flex w-full flex-wrap items-baseline gap-x-3 gap-y-1 text-left text-sm" onClick={toggle}>
         <span className="font-semibold">Gutscheine</span>
         {stillOpen.length ? (
           <span>
@@ -760,7 +820,7 @@ function Vouchers() {
         ) : (
           <span className="text-muted-foreground">keine offenen</span>
         )}
-        <span className="ml-auto text-xs text-muted-foreground">{open ? "ausblenden" : "anzeigen"}</span>
+        <Chevron open={open} className="ml-auto self-center" />
       </button>
       {open && (
         <div className="mt-2 text-sm">

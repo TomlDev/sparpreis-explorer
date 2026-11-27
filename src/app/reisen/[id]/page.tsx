@@ -13,7 +13,7 @@ import { STATUS, legColor, legLabel, mapsLink, uploadFiles } from "@/components/
 import type { AttachmentRow, ClaimRow, TripEventRow, TripRow } from "@/db/schema";
 import { berlinDay, berlinToIso, formatTime, todayLocal } from "@/lib/time";
 import { delayMin, realtimeSummary, type RealtimeSummary } from "@/lib/trips/realtime";
-import { planStates, type PlanInfo } from "@/lib/trips/plan";
+import { competing, planStates, type PlanInfo } from "@/lib/trips/plan";
 import { tripTicketCover, type TripCover } from "@/lib/trips/ticketCover";
 import { arrivalDelayMin, assess, liftedUsableUntil, liveHints, movedNotes, onlineClaimType, ticketSpan, type OnlineClaimType } from "@/lib/trips/rules";
 import { cn, formatEuro } from "@/lib/utils";
@@ -191,6 +191,8 @@ export default function TripPage() {
         <Link href={`/reisen?m=${t.date.slice(0, 7)}`} className="inline-flex items-center gap-1 text-sm text-muted-foreground">
           <ArrowLeft className="h-4 w-4" /> Alle Reisen
         </Link>
+
+        <BookingSwitch t={t} others={sameDay.filter((x) => x.id !== t.id && x.originName === t.originName && x.destName === t.destName && competing(x, t))} />
 
         {/* Header — compact: day, status, route, times; the ticket folds out */}
         <Card className="p-3 sm:p-4">
@@ -1580,6 +1582,29 @@ function PlanRow({
         {btn("skip", "✗ Nehme ich nicht")}
         {plan?.implied && plan.state === "skip" && !mine && <span className="text-muted-foreground">– du nimmst die andere</span>}
       </div>
+    </div>
+  );
+}
+
+/** Several bookings of this very journey (a spare): switch between them – the list shows them as one. */
+function BookingSwitch({ t, others }: { t: Detail; others: TripRow[] }) {
+  if (!others.length) return null;
+  const all = [t, ...others].sort((a, b) => (a.orderNumber ?? a.id).localeCompare(b.orderNumber ?? b.id));
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 text-xs">
+      <span className="text-muted-foreground">{all.length} Buchungen für diese Fahrt:</span>
+      {all.map((x) => {
+        const label = `${x.orderNumber ? `Auftrag …${x.orderNumber.slice(-4)}` : "Buchung"}${x.price != null ? ` · ${formatEuro(x.price)}` : ""} · ${STATUS[x.status]?.label ?? x.status}`;
+        return x.id === t.id ? (
+          <span key={x.id} aria-current="page" className="rounded-full bg-primary px-2.5 py-1 font-semibold text-primary-foreground">
+            {label}
+          </span>
+        ) : (
+          <Link key={x.id} href={`/reisen/${x.id}`} replace className="rounded-full border border-border px-2.5 py-1 hover:bg-muted">
+            {label}
+          </Link>
+        );
+      })}
     </div>
   );
 }

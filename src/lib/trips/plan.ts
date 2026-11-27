@@ -72,3 +72,19 @@ export const PLAN_LABEL: Record<Exclude<PlanState, null>, string> = {
   skip: "Nehme ich nicht",
   open: "Doppelt – welche nimmst du?",
 };
+
+/**
+ * Bookings of one and the same journey (same day, same start and end, overlapping
+ * in time — e.g. a spare booking) → one entry in lists. The first of each group is
+ * the one to open: the one taken, else one still on, else the earliest booked.
+ */
+export function journeyGroups<T extends PlanTrip>(list: T[]): T[][] {
+  const groups: T[][] = [];
+  for (const t of list) {
+    const g = groups.find((g) => g.some((o) => o.date === t.date && o.originName === t.originName && o.destName === t.destName && competing(o, t)));
+    if (g) g.push(t);
+    else groups.push([t]);
+  }
+  const rank = (t: T) => (own(t) === "take" ? 0 : own(t) === null ? 1 : 2);
+  return groups.map((g) => (g.length < 2 ? g : [...g].sort((a, b) => rank(a) - rank(b))));
+}

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Bell, CalendarPlus, Copy, CreditCard, Megaphone, RefreshCw, Star } from "lucide-react";
 import { Badge, Button, Card, Input, buttonClass } from "@/components/ui";
 import { cn, formatEuro } from "@/lib/utils";
+import { Chevron, useStoredOpen } from "@/components/Collapsible";
 
 export interface Reminder {
   id: string;
@@ -65,6 +66,7 @@ export function useAccount() {
 /** Upcoming deadlines (BahnCard, points, vouchers, claims, trips to fill in). */
 export function Reminders({ list }: { list: Reminder[] }) {
   const [all, setAll] = React.useState(false);
+  const { open, toggle } = useStoredOpen("reminders", true);
   const t = today();
   // Only what is close: claims without an answer from a week before the month is up (and while
   // overdue), everything else from 30 days before; open past trips always.
@@ -75,10 +77,14 @@ export function Reminders({ list }: { list: Reminder[] }) {
   const shown = all ? relevant : relevant.slice(0, 4);
   return (
     <Card className="p-3 sm:p-4">
-      <div className="mb-1 flex items-center gap-2 text-sm font-semibold">
-        <Bell className="h-4 w-4 text-primary" /> Erinnerungen
-      </div>
-      <div className="divide-y divide-border text-sm">
+      <button type="button" aria-expanded={open} onClick={toggle} className="flex w-full items-center gap-2 text-left text-sm">
+        <Bell className="h-4 w-4 text-primary" />
+        <span className="font-semibold">Erinnerungen</span>
+        <span className="text-muted-foreground">{relevant.length}</span>
+        <Chevron open={open} className="ml-auto" />
+      </button>
+      {open && (
+      <div className="mt-1 divide-y divide-border text-sm">
         {shown.map((r) => {
           const d = daysUntil(r.date);
           const row = (
@@ -114,7 +120,8 @@ export function Reminders({ list }: { list: Reminder[] }) {
           );
         })}
       </div>
-      {relevant.length > 4 && (
+      )}
+      {open && relevant.length > 4 && (
         <button className="mt-1 text-xs text-primary" onClick={() => setAll((a) => !a)}>
           {all ? "weniger" : `alle ${relevant.length} anzeigen`}
         </button>
@@ -126,9 +133,24 @@ export function Reminders({ list }: { list: Reminder[] }) {
 export function BahnCards({ acc, act }: { acc: Account; act: (b: Record<string, unknown>) => Promise<void> }) {
   if (!acc.bahncards.length && !acc.points) return null;
   const active = acc.activeBahnCard;
+  return <BahnCardsCard acc={acc} act={act} active={active} />;
+}
+
+function BahnCardsCard({ acc, act, active }: { acc: Account; act: (b: Record<string, unknown>) => Promise<void>; active: Account["activeBahnCard"] }) {
+  const { open, toggle } = useStoredOpen("bahncards", true);
   return (
     <Card className="space-y-3 p-3 sm:p-4">
-      {acc.bahncards.map((c) => (
+      <button type="button" aria-expanded={open} onClick={toggle} className="flex w-full flex-wrap items-center gap-x-2 gap-y-1 text-left text-sm">
+        <CreditCard className="h-4 w-4 text-primary" />
+        <span className="font-semibold">BahnCard &amp; BahnBonus</span>
+        {!open && (
+          <span className="text-muted-foreground">
+            {[active?.product, acc.points ? `${acc.points.status.toLocaleString("de-DE")} Statuspunkte` : null].filter(Boolean).join(" · ")}
+          </span>
+        )}
+        <Chevron open={open} className="ml-auto" />
+      </button>
+      {open && acc.bahncards.map((c) => (
         <div key={c.id} className="space-y-1.5 text-sm">
           <div className="flex flex-wrap items-center gap-2">
             <CreditCard className="h-4 w-4 text-primary" />
@@ -178,7 +200,7 @@ export function BahnCards({ acc, act }: { acc: Account; act: (b: Record<string, 
           </div>
         </div>
       ))}
-      {active && acc.prefsBahncard !== active.code && (
+      {open && active && acc.prefsBahncard !== active.code && (
         <div className="flex flex-wrap items-center gap-2 rounded-xl bg-primary/5 p-2 text-sm">
           <span>
             Gerade gültig: <b>{active.product}</b> – in der Preissuche ist {acc.prefsBahncard ? acc.prefsBahncard : "keine BahnCard"} eingestellt.
@@ -188,7 +210,7 @@ export function BahnCards({ acc, act }: { acc: Account; act: (b: Record<string, 
           </Button>
         </div>
       )}
-      {acc.points && (
+      {open && acc.points && (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border pt-2 text-sm">
           <Star className="h-4 w-4 text-warning" />
           <span className="font-semibold">BahnBonus</span>
@@ -207,17 +229,20 @@ export function BahnCards({ acc, act }: { acc: Account; act: (b: Record<string, 
 }
 
 export function Promos({ list }: { list: Account["promos"] }) {
-  const [open, setOpen] = React.useState(false);
+  const { open, toggle } = useStoredOpen("promos", false);
   if (!list.length) return null;
   const t = today();
   const current = list.filter((p) => p.deadline && p.deadline >= t);
   return (
     <Card className="p-3 sm:p-4">
-      <button className="flex w-full items-center gap-2 text-left text-sm" onClick={() => setOpen((o) => !o)}>
+      <button className="flex w-full items-center gap-2 text-left text-sm" onClick={toggle}>
         <Megaphone className="h-4 w-4 text-primary" />
         <span className="font-semibold">Aktionen der Bahn</span>
         <span className="text-muted-foreground">{current.length ? `${current.length} laufen noch` : "keine laufenden"}</span>
-        <span className="ml-auto text-xs text-muted-foreground">{open ? "ausblenden" : `${list.length} anzeigen`}</span>
+        <span className="ml-auto flex items-center gap-1 text-xs text-muted-foreground">
+          {!open && list.length}
+          <Chevron open={open} />
+        </span>
       </button>
       {open && (
         <div className="mt-2 divide-y divide-border text-sm">
@@ -244,15 +269,15 @@ export function Promos({ list }: { list: Account["promos"] }) {
 
 /** Subscribe link for phone calendars (trips + reminders). */
 export function CalendarSubscribe({ url, act }: { url: string; act: (b: Record<string, unknown>) => Promise<void> }) {
-  const [open, setOpen] = React.useState(false);
+  const { open, toggle } = useStoredOpen("calendar", false);
   const [copied, setCopied] = React.useState(false);
   const webcal = url.replace(/^https?:/, "webcal:");
   return (
     <Card className="p-3 sm:p-4">
-      <button className="flex w-full items-center gap-2 text-left text-sm" onClick={() => setOpen((o) => !o)}>
+      <button className="flex w-full items-center gap-2 text-left text-sm" onClick={toggle}>
         <CalendarPlus className="h-4 w-4 text-primary" />
         <span className="font-semibold">Im Handy-Kalender abonnieren</span>
-        <span className="ml-auto text-xs text-muted-foreground">{open ? "ausblenden" : "anzeigen"}</span>
+        <Chevron open={open} className="ml-auto" />
       </button>
       {open && (
         <div className="mt-2 space-y-2 text-sm">
