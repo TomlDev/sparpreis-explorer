@@ -9,6 +9,7 @@ import { CopyCode } from "@/components/CopyCode";
 import { Button, Card, Input, Spinner } from "@/components/ui";
 import { EventDialog } from "@/components/trips/EventDialog";
 import { ForecastCard } from "@/components/trips/ForecastCard";
+import { TripTimeline } from "@/components/trips/TripTimeline";
 import { STATUS, legColor, legLabel, mapsLink, uploadFiles } from "@/components/trips/tripUi";
 import type { AttachmentRow, ClaimRow, TripEventRow, TripRow } from "@/db/schema";
 import { berlinDay, berlinToIso, formatTime, todayLocal } from "@/lib/time";
@@ -54,6 +55,44 @@ const berlinIso = berlinToIso;
 const deDay = (d: string) => new Date(`${d}T12:00:00Z`).toLocaleDateString("de-DE");
 const berlinDate = (iso: string) => berlinDay(iso);
 
+/** "Gütenbach Neueck, Furtwangen im Schwarzwald" → "Gütenbach Neueck" (stop before the town). */
+const placeOnly = (name: string) => name.split(",")[0].trim() || name;
+
+const isChangeNote = (e: TripEventRow) => e.type === "note" && /^Fahrplanänderung/.test(e.text ?? "");
+
+type ScheduleChangeInfo = NonNullable<NonNullable<Detail["ticket"]>["scheduleChange"]>;
+
+/** DB's schedule change in one line; what changed folds out (and the earlier change mails). */
+function ScheduleChange({ c, notes }: { c: ScheduleChangeInfo; notes: TripEventRow[] }) {
+  const day = (v: number | string) => new Date(v).toLocaleDateString("de-DE", { timeZone: "Europe/Berlin", day: "numeric", month: "numeric" });
+  const source = c.text.startsWith("Laut Ticket") ? "laut Ticket" : `Mail ${day(c.notifiedAt)}`;
+  const earlier = notes.filter((n) => Math.abs(n.at - Date.parse(String(c.notifiedAt))) > 60_000);
+  const more = !!c.details?.length || earlier.length > 0;
+  const line = (
+    <>
+      <b className="text-warning">Fahrplanänderung</b> <span className="text-muted-foreground">({source})</span>:{" "}
+      {c.zugbindungLifted ? "Zugbindung aufgehoben – jeder Zug zum Ziel erlaubt" : "bitte die Verbindung prüfen"}
+    </>
+  );
+  if (!more) return <p className="mt-2 text-sm">{line}</p>;
+  return (
+    <details className="group mt-2 text-sm">
+      <summary className="flex cursor-pointer list-none items-start gap-1.5 [&::-webkit-details-marker]:hidden">
+        <span className="min-w-0 flex-1">{line}</span>
+        <ChevronDown className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
+      </summary>
+      {!!c.details?.length && (
+        <ul className="mt-1 list-disc space-y-0.5 pl-5 text-xs text-muted-foreground">
+          {c.details.map((d) => (
+            <li key={d}>{d}</li>
+          ))}
+        </ul>
+      )}
+      {earlier.length > 0 && <p className="mt-1 text-xs text-muted-foreground">Frühere Änderungsmails: {earlier.map((n) => day(n.at)).join(", ")}</p>}
+    </details>
+  );
+}
+
 export default function TripPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
@@ -95,6 +134,8 @@ export default function TripPage() {
 
   // Lives here, not in WhatHappened: a save changes its key and remounts it.
   const [whSaved, setWhSaved] = React.useState(false);
+  // "Damit gefahren …" / "Erstattung" in the open-ticket box opens "Was ist passiert?" with that choice
+  const [whPreset, setWhPreset] = React.useState<string | null>(null);
   const flash = (m: string, ok = true) => {
     setMsg({ text: m, ok });
     setTimeout(() => setMsg(null), 4000);
@@ -136,7 +177,10 @@ export default function TripPage() {
 
   const eventsByLeg = new Map<number, TripEventRow[]>();
   const loose: TripEventRow[] = [];
+  // DB change mails are shown in the header (ScheduleChange) – not again in the timeline
+  const changeNotes = t.ticket?.scheduleChange ? t.events.filter(isChangeNote) : [];
   for (const e of t.events) {
+    if (changeNotes.includes(e)) continue;
     if (e.legIndex != null && t.legs[e.legIndex]) eventsByLeg.set(e.legIndex, [...(eventsByLeg.get(e.legIndex) ?? []), e]);
     else loose.push(e);
   }
@@ -160,6 +204,7 @@ export default function TripPage() {
   const plan = planStates(sameDay.some((x) => x.id === t.id) ? sameDay.map((x) => (x.id === t.id ? t : x)) : [...sameDay, t]).get(t.id);
   const rivals = sameDay.filter((x) => plan?.rivals.includes(x.id));
   const screenshots = t.attachments.filter((a) => !["claim", "ticket", "decision"].includes(a.kind));
+  const travelDay = tripDays.includes(todayLocal());
   const tickets = t.attachments.filter((a) => a.kind === "ticket");
   const forms = t.attachments.filter((a) => a.kind === "claim" || a.kind === "decision");
 
@@ -198,15 +243,16 @@ export default function TripPage() {
         <Card className="p-3 sm:p-4">
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
-              <div className="text-xs text-muted-foreground">{dayLabel(t.date)}</div>
-              <h1 className="text-base font-semibold leading-snug sm:text-lg">
-                {t.originName} → {t.destName}
+              {/* "Gütenbach Neueck, Furtwangen im Schwarzwald" → "Gütenbach Neueck": the full names are in the connection below */}
+              <h1 className="text-base font-semibold leading-snug sm:text-lg" title={`${t.originName} → ${t.destName}`}>
+                {placeOnly(t.originName)} → {placeOnly(t.destName)}
               </h1>
-              <div className="tabular-nums text-sm">
+              <div className="tabular-nums text-sm text-muted-foreground">
+                {new Date(`${t.date}T12:00:00Z`).toLocaleDateString("de-DE", { weekday: "short", day: "numeric", month: "numeric", year: "numeric", timeZone: "UTC" })}
                 {t.plannedDeparture || t.plannedArrival ? (
-                  `${formatTime(t.plannedDeparture)} – ${formatTime(t.plannedArrival)}`
+                  ` · ${formatTime(t.plannedDeparture)} – ${formatTime(t.plannedArrival)}`
                 ) : (
-                  <span className="text-muted-foreground">Uhrzeiten unbekannt{t.source === "claim" ? " (aus Fahrgastrechte-Antrag)" : ""}</span>
+                  <span> · Uhrzeiten unbekannt{t.source === "claim" ? " (aus Fahrgastrechte-Antrag)" : ""}</span>
                 )}
                 {t.actualArrival && (
                   <span className={cn("ml-2 font-semibold", (delay ?? 0) >= 60 ? "text-danger" : (delay ?? 0) >= 20 ? "text-warning" : "text-success")}>
@@ -220,32 +266,33 @@ export default function TripPage() {
               {STATUS[t.status]?.label ?? t.status}
             </span>
           </div>
+          {t.plannedDeparture && t.plannedArrival && t.legs.some((l) => !l.isWalking && l.lineName) && (
+            <div className="mt-2">
+              <TripTimeline legs={t.legs} from={t.plannedDeparture} to={t.plannedArrival} />
+            </div>
+          )}
           <ClaimChip claims={t.claims} />
           <MovedBanner t={t} />
           <BookingLinks t={t} vouchers={vouchers} />
           <PlanRow t={t} plan={plan} rivals={rivals} onSave={patch} />
-          {t.ticket?.scheduleChange && (
-            <div className="mt-2 rounded-xl border border-warning/40 bg-warning/10 p-2.5 text-sm">
-              <b>Fahrplanänderung</b> ({t.ticket.scheduleChange.text.startsWith("Laut Ticket") ? "laut Ticket in DB Navigator" : "Mail"} vom{" "}
-              {new Date(t.ticket.scheduleChange.notifiedAt).toLocaleDateString("de-DE")}):{" "}
-              {t.ticket.scheduleChange.zugbindungLifted
-                ? "Zugbindung aufgehoben – du darfst jeden Zug zu deinem Ziel nehmen, auch früher oder auf anderer Route."
-                : "bitte die Verbindung prüfen."}
-              {!!t.ticket.scheduleChange.details?.length && (
-                <ul className="mt-1 list-disc space-y-0.5 pl-5">
-                  {t.ticket.scheduleChange.details.map((d) => (
-                    <li key={d}>{d}</li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          )}
+          {t.ticket?.scheduleChange && <ScheduleChange c={t.ticket.scheduleChange} notes={changeNotes} />}
           <TicketPanel t={t} tickets={tickets} cover={cover} onSave={patch} />
         </Card>
 
+        {t.status === "lifted" && (
+          <OpenTicketBox
+            t={t}
+            onChoose={(st) => {
+              setWhPreset(st);
+              setTimeout(() => document.getElementById("was-ist-passiert")?.scrollIntoView({ block: "start", behavior: "smooth" }), 80);
+            }}
+          />
+        )}
+
         <ForecastCard key={`${t.id}|${t.status}|${t.plan}`} t={t} />
 
-        {/* Quick actions — one row even on a small phone */}
+        {/* Quick actions on the travel day — one row even on a small phone; other days small, below the connection */}
+        {travelDay && (
         <div className="grid grid-cols-3 gap-2">
           <Button variant="outline" size="sm" className="px-2" onClick={() => setDialog({ event: null, type: "control" })}>
             <ShieldCheck className="h-4 w-4 shrink-0" /> Kontrolle
@@ -257,6 +304,7 @@ export default function TripPage() {
             <StickyNote className="h-4 w-4 shrink-0" /> Notiz
           </Button>
         </div>
+        )}
         {msg && <p className={cn("text-sm font-medium", msg.ok ? "text-success" : "text-danger")}>{msg.text}</p>}
         <EventDialog
           open={!!dialog}
@@ -289,33 +337,34 @@ export default function TripPage() {
                     <RtMark planned={l.plannedDeparture} actual={l.rt?.dep} cancelled={l.rt?.depCancelled} later={l.rt?.dbLater?.dep} />
                   )}
                 </div>
-                <div className="ml-12 flex flex-wrap items-center gap-2 border-l-2 border-dashed border-border py-1 pl-3">
+                {/* the train and where it goes as one flowing line */}
+                <div className="ml-12 border-l-2 border-dashed border-border py-1 pl-3 text-xs leading-6">
                   {l.isWalking ? (
-                    <span className="text-xs text-muted-foreground">Fußweg</span>
+                    <span className="mr-1.5 text-muted-foreground">Fußweg</span>
                   ) : !l.product && !l.lineName ? (
-                    <span className="text-xs text-muted-foreground">Züge unbekannt</span>
+                    <span className="mr-1.5 text-muted-foreground">Züge unbekannt</span>
                   ) : (
-                    <span className={cn("rounded px-2 py-0.5 text-xs font-semibold", legColor(l))}>{legLabel(l)}</span>
+                    <span className={cn("mr-1.5 rounded px-1.5 py-0.5 font-semibold", legColor(l))}>{legLabel(l)}</span>
                   )}
                   {cover?.legs[i] === "out" && (
-                    <span className="rounded bg-warning/15 px-1.5 py-0.5 text-[10px] font-semibold text-warning" title="Dieser Abschnitt gehört nicht zum Ticket – eigener Fahrschein nötig">
+                    <span className="mr-1.5 rounded bg-warning/15 px-1.5 py-0.5 text-[10px] font-semibold text-warning" title="Dieser Abschnitt gehört nicht zum Ticket – eigener Fahrschein nötig">
                       nicht im Ticket
                     </span>
                   )}
                   {cover?.legs[i] === "city" && (
-                    <span className="rounded bg-success/15 px-1.5 py-0.5 text-[10px] font-semibold text-success" title="Im City-Ticket enthalten (Nahverkehr in der Stadt)">
+                    <span className="mr-1.5 rounded bg-success/15 px-1.5 py-0.5 text-[10px] font-semibold text-success" title="Im City-Ticket enthalten (Nahverkehr in der Stadt)">
                       City-Ticket
                     </span>
                   )}
-                  <span className="text-xs text-muted-foreground">
+                  <span className="text-muted-foreground">
                     {l.depPlatform ? `Gl. ${l.depPlatform} ` : ""}→ {l.toName} an {formatTime(l.plannedArrival)}
-                    {l.arrPlatform ? ` · Gl. ${l.arrPlatform}` : ""}
-                  </span>
+                  </span>{" "}
+                  {/* the actual arrival right after the planned one */}
                   {!l.isWalking && l.rt?.arr && (
-                    <RtMark planned={l.plannedArrival} actual={l.rt.arr} cancelled={l.rt.arrCancelled} prefix="an" later={l.rt.dbLater?.arr} />
+                    <RtMark planned={l.plannedArrival} actual={l.rt.arr} cancelled={l.rt.arrCancelled} later={l.rt.dbLater?.arr} />
                   )}
-                  {!!l.rtLog?.length && <LiveLog leg={l} />}
-                  {l.reservation && <span className="text-xs font-medium text-primary">Platz: {l.reservation}</span>}
+                  {l.arrPlatform && <span className="text-muted-foreground"> · Gl. {l.arrPlatform}</span>}
+                  {l.reservation && <span className="ml-1.5 font-medium text-primary">Platz: {l.reservation}</span>}
                 </div>
                 <EventList
                   events={eventsByLeg.get(i) ?? []}
@@ -346,6 +395,20 @@ export default function TripPage() {
               onEdit={(e) => setDialog({ event: e, type: e.type === "note" ? "note" : "control" })}
             />
           </div>
+          <LiveLog legs={t.legs} />
+          {!travelDay && (
+            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs">
+              <button type="button" className="inline-flex items-center gap-1 text-primary" onClick={() => setDialog({ event: null, type: "note" })}>
+                <StickyNote className="h-3.5 w-3.5" /> Notiz
+              </button>
+              <button type="button" className="inline-flex items-center gap-1 text-primary" disabled={busy === "upload"} onClick={() => fileRef.current?.click()}>
+                {busy === "upload" ? <Spinner /> : <Camera className="h-3.5 w-3.5" />} Beleg
+              </button>
+              <button type="button" className="inline-flex items-center gap-1 text-primary" onClick={() => setDialog({ event: null, type: "control" })}>
+                <ShieldCheck className="h-3.5 w-3.5" /> Kontrolle
+              </button>
+            </div>
+          )}
           <PasteConnection
             tripId={t.id}
             known={t.legs.some((l) => !!l.lineName)}
@@ -393,10 +456,11 @@ export default function TripPage() {
         </Card>
 
         {/* What happened + passenger rights in one card; folds when settled */}
-        <OutcomeCard t={t} ent={ent}>
+        <OutcomeCard t={t} ent={ent} forceOpen={!!whPreset}>
           <WhatHappened
-            key={`${t.status}|${t.actualArrival}|${t.abortedAt}|${t.expectedDelayMin}|${t.returnedToStart}|${t.notes}`}
+            key={`${t.status}|${t.actualArrival}|${t.abortedAt}|${t.expectedDelayMin}|${t.returnedToStart}|${t.notes}|${whPreset}`}
             t={t}
+            preset={whPreset}
             saved={whSaved}
             shots={screenshots.length}
             onMoved={(m) => {
@@ -415,14 +479,10 @@ export default function TripPage() {
           <div id="fahrgastrechte" className="mt-4 scroll-mt-20 border-t border-border pt-3">
             <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Fahrgastrechte</h3>
           {t.status === "lifted" ? (
-            <div className="space-y-1 text-sm">
-              <span className="font-semibold">Ticket offen – Zugbindung aufgehoben</span>
-              <p className="text-muted-foreground">
-                Nutzbar laut DB bis {deDay(liftedUsableUntil(t.date))}. Fährst du damit, oben „Damit gefahren …“ – dort zählt dann eine neue
-                Verspätung. Erstattung gibt es nur bei mind. 60 min angekündigter Verspätung
-                {t.expectedDelayMin != null ? ` (eingetragen: ${t.expectedDelayMin} min)` : ""}.
-              </p>
-            </div>
+            <p className="text-sm text-muted-foreground">
+              Ticket offen (Kasten oben). Fährst du damit, zählt die Verspätung dieser neuen Fahrt; Erstattung nur ab 60 min
+              angekündigter Verspätung{t.expectedDelayMin != null ? ` (eingetragen: ${t.expectedDelayMin} min)` : ""}.
+            </p>
           ) : t.status === "moved" ? (
               <div className="space-y-2 text-sm">
                 <span className="font-semibold">Ticket an einem anderen Tag genutzt</span>
@@ -613,24 +673,36 @@ function RtMark({
 }
 
 /** Every live observation of one train (forecasts included) — kept as evidence. */
-function LiveLog({ leg }: { leg: Detail["legs"][number] }) {
-  const log = leg.rtLog ?? [];
+/** What the live tracking measured, all trains under one fold (evidence of when DB said what). */
+function LiveLog({ legs }: { legs: Detail["legs"] }) {
+  const withLog = legs.filter((l) => !!l.rtLog?.length);
+  if (!withLog.length) return null;
+  const n = withLog.reduce((k, l) => k + (l.rtLog?.length ?? 0), 0);
   const fmt = (planned: string | null, v: string | null | undefined, cancelled?: boolean) => {
     if (cancelled) return "fällt aus";
     const d = delayMin(planned, v);
     return v ? `${formatTime(v)}${d ? ` (${d > 0 ? "+" : ""}${d})` : ""}` : "–";
   };
   return (
-    <details className="w-full text-xs text-muted-foreground">
-      <summary className="cursor-pointer select-none">Live-Verlauf ({log.length} Messungen)</summary>
-      <ul className="mt-1 space-y-0.5 tabular-nums">
-        {log.map((o) => (
-          <li key={o.at}>
-            {new Date(o.at).toLocaleTimeString("de-DE", { timeZone: "Europe/Berlin", hour: "2-digit", minute: "2-digit" })}: ab{" "}
-            {fmt(leg.plannedDeparture, o.dep, o.depCancelled)} · an {fmt(leg.plannedArrival, o.arr, o.arrCancelled)}
-          </li>
+    <details className="mt-2 text-xs text-muted-foreground">
+      <summary className="cursor-pointer select-none">
+        Live-Verlauf ({n} Messungen an {withLog.length} {withLog.length === 1 ? "Zug" : "Zügen"})
+      </summary>
+      <div className="mt-1 space-y-2">
+        {withLog.map((leg, i) => (
+          <div key={i}>
+            <div className="font-medium text-foreground">{legLabel(leg)}</div>
+            <ul className="space-y-0.5 tabular-nums">
+              {(leg.rtLog ?? []).map((o) => (
+                <li key={o.at}>
+                  {new Date(o.at).toLocaleTimeString("de-DE", { timeZone: "Europe/Berlin", hour: "2-digit", minute: "2-digit" })}: ab{" "}
+                  {fmt(leg.plannedDeparture, o.dep, o.depCancelled)} · an {fmt(leg.plannedArrival, o.arr, o.arrCancelled)}
+                </li>
+              ))}
+            </ul>
+          </div>
         ))}
-      </ul>
+      </div>
     </details>
   );
 }
@@ -1033,8 +1105,11 @@ function WhatHappened({
   onSave,
   onMoved,
   shots,
+  preset,
 }: {
   t: Detail;
+  /** a choice made outside (the open-ticket box) */
+  preset?: string | null;
   saved: boolean;
   onSave: (b: Record<string, unknown>) => Promise<boolean>;
   onMoved: (msg: string) => void;
@@ -1043,7 +1118,7 @@ function WhatHappened({
 }) {
   const span = ticketSpan(t);
   const rt = realtimeSummary(t.legs);
-  const [status, setStatus] = React.useState(t.status);
+  const [status, setStatus] = React.useState(preset ?? t.status);
   const [arrDate, setArrDate] = React.useState(t.actualArrival ? berlinDate(t.actualArrival) : span.arrival ? berlinDate(span.arrival) : t.date);
   const [arrTime, setArrTime] = React.useState(t.actualArrival ? formatTime(t.actualArrival) : "");
   const [abortedAt, setAbortedAt] = React.useState(t.abortedAt ?? t.originName);
@@ -1127,23 +1202,6 @@ function WhatHappened({
       {hint && <p className="mt-2 text-xs text-muted-foreground">{hint}</p>}
       {status === "lifted" && exp != null && exp < 20 && (
         <p className="mt-1 text-xs text-warning">Unter 20 min angekündigter Verspätung gilt die Zugbindung noch.</p>
-      )}
-      {/* open ticket: the two ways on */}
-      {t.status === "lifted" && status === "lifted" && (
-        <div className="mt-2 flex flex-wrap gap-1.5">
-          <Button size="sm" variant="outline" onClick={() => setStatus("moved")}>
-            Damit gefahren …
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={(t.expectedDelayMin ?? 0) < 60}
-            title={(t.expectedDelayMin ?? 0) < 60 ? "Erstattung erst ab 60 min angekündigter Verspätung" : undefined}
-            onClick={() => setStatus("not_started")}
-          >
-            Erstattung beantragen
-          </Button>
-        </div>
       )}
       {rt?.arrival ? (
         <p className="mt-2 text-xs">
@@ -1395,7 +1453,7 @@ function claimSummary(claims: ClaimRow[]): string {
   return [...parts, c.caseId].filter(Boolean).join(" · ");
 }
 
-function OutcomeCard({ t, ent, children }: { t: Detail; ent: ReturnType<typeof assess>; children: React.ReactNode }) {
+function OutcomeCard({ t, ent, forceOpen, children }: { t: Detail; ent: ReturnType<typeof assess>; forceOpen?: boolean; children: React.ReactNode }) {
   const past = !!t.plannedDeparture && new Date(t.plannedDeparture).getTime() < Date.now();
   const sent = t.claims.some((c) => ["submitted", "query", "followup", "paid", "rejected"].includes(c.status));
   const settled = sent || (t.status !== "planned" && t.status !== "lifted" && !ent?.payable);
@@ -1414,7 +1472,11 @@ function OutcomeCard({ t, ent, children }: { t: Detail; ent: ReturnType<typeof a
         ]
           .filter(Boolean)
           .join(" · ");
-  const [open, setOpen] = React.useState(() => !(settled || (t.status === "planned" && !past)));
+  // open only when something is to do: a past trip to fill in, or money due and not claimed yet
+  const [open, setOpen] = React.useState(() => (t.status === "planned" ? past : !settled && !!ent?.payable));
+  React.useEffect(() => {
+    if (forceOpen) setOpen(true);
+  }, [forceOpen]);
   // "#fahrgastrechte" (header chip, reminders, claims list) opens it and scrolls there
   React.useEffect(() => {
     const go = () => {
@@ -1428,7 +1490,7 @@ function OutcomeCard({ t, ent, children }: { t: Detail; ent: ReturnType<typeof a
     return () => window.removeEventListener("hashchange", go);
   }, []);
   return (
-    <Card className="p-3 sm:p-4">
+    <Card id="was-ist-passiert" className="scroll-mt-20 p-3 sm:p-4">
       <button type="button" onClick={() => setOpen((o) => !o)} className="flex w-full items-center gap-2 text-left" aria-expanded={open}>
         <span className="min-w-0 flex-1">
           <span className="block text-sm font-semibold uppercase tracking-wide text-muted-foreground">Was ist passiert?</span>
@@ -1583,6 +1645,37 @@ function PlanRow({
         {plan?.implied && plan.state === "skip" && !mine && <span className="text-muted-foreground">– du nimmst die andere</span>}
       </div>
     </div>
+  );
+}
+
+/** An open ticket (Zugbindung lifted, not travelled): until when, and the two ways on – right under the header. */
+function OpenTicketBox({ t, onChoose }: { t: Detail; onChoose: (status: "moved" | "not_started") => void }) {
+  const until = liftedUsableUntil(t.date);
+  const days = Math.round((Date.parse(`${until}T12:00:00Z`) - Date.parse(`${todayLocal()}T12:00:00Z`)) / 86_400_000);
+  const refund = (t.expectedDelayMin ?? 0) >= 60;
+  return (
+    <Card className="border-primary/40 bg-primary/5 p-3 text-sm sm:p-4">
+      <div className="flex flex-wrap items-baseline gap-x-2">
+        <b className="text-primary">Ticket offen</b>
+        <span className={cn(days <= 31 && "font-semibold text-warning")}>
+          {days < 0 ? `abgelaufen am ${deDay(until)}` : `nutzbar bis ${deDay(until)}${days <= 60 ? ` (noch ${days} T.)` : ""}`}
+        </span>
+      </div>
+      <p className="mt-0.5 text-xs text-muted-foreground">
+        Zugbindung aufgehoben: auf der Strecke des Tickets mit jedem Zug.{" "}
+        {refund ? "Oder Erstattung, weil ≥ 60 min Verspätung angekündigt waren." : "Erstattung erst ab 60 min angekündigter Verspätung."}
+      </p>
+      {days >= 0 && (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          <Button size="sm" onClick={() => onChoose("moved")}>
+            Damit gefahren …
+          </Button>
+          <Button size="sm" variant="outline" disabled={!refund} onClick={() => onChoose("not_started")}>
+            Erstattung beantragen
+          </Button>
+        </div>
+      )}
+    </Card>
   );
 }
 

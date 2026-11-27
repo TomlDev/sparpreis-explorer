@@ -208,6 +208,12 @@ Gebucht ist ein günstiges Ticket mit hoher Flex-Chance, jetzt zählt der Tag se
 - **Fahrten als Zeitleiste:** Jede Fahrt in der Liste zeigt ihre Züge als farbigen Balken –
   jeder Abschnitt so lang, wie der Zug fährt (ICE rot, Regio grau, S-Bahn grün, Bus lila),
   die Zugnamen darunter, dazu Status und Umstiege in Worten.
+- **Fahrt-Seite aufgeräumt:** Kopf mit kurzem Ortsnamen, Datum und Zeitleiste; die
+  Fahrplanänderung als eine Zeile (Details aufklappbar, keine doppelte Notiz mehr). Ein offenes
+  Ticket steht als Kasten direkt darunter – „nutzbar bis …“, **Damit gefahren …** und
+  **Erstattung**. Jeder Zug der Verbindung in einer Zeile, der Live-Verlauf aller Züge unter
+  einem Schalter. „Was ist passiert?“ ist zu, solange nichts zu tun ist; Kontrolle / Beleg /
+  Notiz stehen am Reisetag groß oben, sonst klein unter der Verbindung.
 - **Alles klappbar:** Jeder Abschnitt unter „Meine Reisen“ (nächste Fahrt, Kalender, Fahrten
   im Monat, Erinnerungen, Fahrgastrechte, BahnCard, offene Tickets, Gutscheine, Aktionen,
   Kalender-Abo) lässt sich einklappen; der Zustand bleibt in diesem Browser gespeichert.
